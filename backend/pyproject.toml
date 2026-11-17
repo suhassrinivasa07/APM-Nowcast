@@ -35,4 +35,4 @@ ml = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "backend", "..", "../common", "../data_ingestion"]
+pythonpath = [".", "backend", "..", "../common", "../data_ingestion", "../preprocessing"]
