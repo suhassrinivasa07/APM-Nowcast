@@ -1,153 +1,224 @@
-# APM-Nowcast
+# ⛈️ APM-Nowcast — Adaptive Physics-Guided Multimodal Convective Nowcasting  
+### Real-Time Thunderstorm, Lightning & Cyclonic Risk Prediction System across Pan-India  
+*(Research & Operational Prototype)*
 
-> **An Uncertainty-Aware Physics-Guided Adaptive Multimodal Deep Learning Framework for Thunderstorm Initiation and Lightning Nowcasting over India**
+**APM-Nowcast** is an end-to-end spatiotemporal deep-learning and mesoscale physics-guided nowcasting platform designed for **short-range convective initiation, lightning flash density, and cyclonic storm tracking** (`T+0` to `T+60 min`) across the Pan-India domain (`6.0°N–38.0°N, 68.0°E–98.0°E`).
 
-APM-Nowcast is an end-to-end meteorological deep learning platform engineered to forecast Thunderstorm Initiation (TI) and nowcast lightning strikes with high spatiotemporal fidelity across the Indian subcontinent.
+It combines a **PyTorch ConvLSTM / U-Net spatiotemporal backbone** with **FiLM physics conditioning**, **Monte Carlo Dropout uncertainty quantification**, a **5-point spatial stencil + rotational-cancellation steering engine** over live Open-Meteo NWP fields, and an interactive **React + TypeScript geospatial dashboard**.
 
-The framework integrates multimodal observations (INSAT-3D/3DR geostationary satellite imagery, IMD Doppler Weather Radars, and IITM Lightning Location Networks) paired with thermodynamic convective proxies and uncertainty quantification.
-
----
-
-## Hardware Target & Specifications
-
-- **OS:** Windows 11
-- **Compute:** NVIDIA GeForce RTX 3050 Laptop GPU (4 GB VRAM)
-- **Frameworks:** Python 3.11+, PyTorch, FastAPI, React 18, TypeScript, Vite
-- **VRAM Optimizations:** FP16 mixed precision, gradient checkpointing, and spatial tiling.
+> ⚠️ Note: This is a research and academic engineering prototype. Outputs reflect neural-physics model inference on multi-modal atmospheric inputs and live NWP fields, not official IMD operational warnings.
 
 ---
 
-## Repository Structure
+## 📌 Table of Contents
+- [Overview](#overview)
+- [Research Contributions](#research-contributions)
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Project Architecture](#project-architecture)
+- [Folder Structure](#folder-structure)
+- [Working Process](#working-process)
+- [Installation](#installation)
+- [Running the Application](#running-the-application)
+- [Testing & Verification](#testing--verification)
+- [Future Enhancements](#future-enhancements)
+- [Credits / References](#credits--references)
+
+---
+
+## 🧩 Overview
+
+Severe convective storms, lightning strikes, and tropical cyclones over the Indian subcontinent evolve rapidly at mesoscale resolutions where coarse numerical weather prediction (NWP) models smooth out eyewall gradients and single-sensor pipelines degrade during radar or satellite outages. **APM-Nowcast** addresses this across two integrated layers:
+
+### **Phase 1 — Physics-Guided Multimodal Spatiotemporal Modeling**  
+Fuses **DWR Doppler Radar**, **INSAT-3D/3DR/3DS Satellite**, **NRSC Lightning**, and **ERA5 / NWP Thermodynamics** using adaptive cross-modal attention, FiLM physics conditioning (`CAPE`, `CIN`, vertical shear), and Monte Carlo Dropout heads for calibrated probabilistic forecasts (`T+15`, `T+30`, `T+45`, `T+60 min`).
+
+### **Phase 2 — Live Mesoscale & Cyclonic Atmospheric Analyzer**  
+Queries a **5-point spatial stencil (`Center + ±1.0° N/S/E/W`)** across multi-level pressure surfaces (`850`, `500`, and `300 hPa`), performs **rotational-cancellation deep-layer steering**, applies **3-node Inverse-Distance Weighted (IDW) spatial interpolation**, and dynamically classifies convective regimes without hardcoded storm rules.
+
+---
+
+## 🔬 Research Contributions
+
+- **RG1 — Adaptive Multimodal Fusion:** Dynamically re-weights attention across Radar, Satellite, Lightning, and NWP streams, cleanly zeroing dropped sensors and renormalizing weights under single- or multi-feed outages.
+- **RG2 — Convective Initiation Prediction:** Gates false alerts in dry capped high-`CAPE` air using `700 hPa` relative humidity, `CIN`, and local radial pressure drops (`ΔP`), while capturing tight cyclonic cores and developing cells.
+- **RG6 — Uncertainty-Aware Prediction:** Decomposes total forecast uncertainty into **aleatoric** and **epistemic** bounds via Monte Carlo Dropout, inflating confidence intervals proportionally during sensor blackouts.
+- **RG7 — Physics-Guided Learning & Inference:** Integrates near-identity FiLM thermodynamic conditioning, physics-constrained loss regularization, and deep-layer (`850/500/300 hPa`) rotational-cancellation steering vectors.
+
+---
+
+## ⭐ Features
+
+- 🗺️ **Interactive Pan-India Geospatial Map** — Real-time convective cells, wind streamlines, DWR 250 km radar range rings, and sub-region zoom presets
+- ⚡ **Multi-Horizon Probabilistic Nowcasting (`+15` to `+60 min`)** — Lightning occurrence probability (`%`), flash rate density (`fl/km²`), and total/aleatoric uncertainty bounds
+- 🛰️ **Sensor Dropout & Reliability Simulator** — Toggle Radar, Satellite, Lightning, or NWP feeds live to inspect dynamic attention weight redistribution and uncertainty inflation
+- 🌀 **Zero-Hardcoding 5-Point Spatial Stencil** — Resolves cyclone eyewalls, radial pressure anomalies (`ΔP`), and deep-layer environmental steering drift (`NNW`/`NE` translation)
+- 📍 **3-Node IDW Spatial Interpolation** — Eliminates duplicate telemetry across neighboring inland regions by smoothly interpolating thermodynamic and wind fields
+- 🏷️ **Physics-Driven Regime Labeling** — Dynamically classifies cells into `Cyclonic Cell`, `Cyclonic Band`, `Convective Core`, `Developing Cell`, or `Stable Air Mass`
+
+---
+
+## 🛠 Tech Stack
+
+| Component | Technology |
+|----------|------------|
+| Backend API | Python 3.13, FastAPI, Uvicorn, Pydantic |
+| Deep Learning | PyTorch (ConvLSTM, U-Net, FiLM Conditioning, MC Dropout) |
+| Atmospheric & Data | Xarray, Zarr, NumPy, SciPy, H5py, NetCDF4, HTTPX (Open-Meteo NWP) |
+| Frontend | React, TypeScript, Vite, MapLibre / Deck.gl, Tailwind CSS |
+| Testing & QA | Pytest (352 unit, physics calibration & end-to-end integration tests) |
+| Deployment | Localhost (FastAPI on `:8000` + Vite on `:5173`) |
+
+---
+
+## 🏗 Project Architecture
+
+```text
+Multi-Modal Inputs (Radar / INSAT / Lightning / ERA5 + Live Open-Meteo 5-Point Stencil)
+        │
+        ▼
+Preprocessing & Grid Alignment (Common Pan-India Grid, QC Masks, Zarr/NetCDF Cubes)
+        │
+        ▼
+APM-Nowcast Neural-Physics Core (ConvLSTM/UNet + FiLM Conditioning + Adaptive Attention + MC Dropout)
+        │
+        ▼
+Mesoscale Post-Processing (Deep-Layer 850/500/300 hPa Steering + 3-Node IDW + Regime Classifier)
+        │
+        ▼
+FastAPI v1 Endpoints (/forecast/latest, /nowcast/snapshot, /scenarios/dropout) ──► React Dashboard
+```
+
+---
+
+## 📁 Folder Structure
 
 ```text
 APM-Nowcast/
-├── .env.example              # Environment variables template
-├── .gitignore                # Git exclusions (data, weights, environments)
-├── README.md                 # Project documentation and quickstart
-├── backend/                  # FastAPI Application & Scientific Computing
+├── backend/
 │   ├── app/
-│   │   ├── api/              # API router and versioned endpoints (v1)
+│   │   ├── api/
 │   │   │   └── v1/
-│   │   │       ├── endpoints/
-│   │   │       │   └── health.py  # GET /health & /api/v1/health
-│   │   │       └── router.py
-│   │   ├── core/             # Configuration & environment settings
-│   │   │   └── config.py
-│   │   ├── db/               # PostgreSQL persistence (future phase)
-│   │   ├── schemas/          # Pydantic data validation schemas
-│   │   │   └── health.py
-│   │   ├── services/         # Physics engines & ML inference pipelines
-│   │   └── main.py           # FastAPI entrypoint & CORS configuration
-│   ├── tests/                # Automated pytest suite
-│   │   ├── conftest.py       # Test fixtures and client initialization
-│   │   └── test_health.py    # Health check and endpoint assertions
-│   ├── pyproject.toml        # Modern Python package configuration
-│   └── requirements.txt      # Backend Python dependencies
-├── frontend/                 # React + TypeScript + Vite Dashboard
+│   │   │       └── endpoints/       # FastAPI routes (nowcast, health)
+│   │   ├── schemas/                 # Pydantic request/response contracts
+│   │   ├── services/
+│   │   │   ├── inference_service.py # Snapshot builder, regime labeling & dropout fusion
+│   │   │   └── live_weather.py      # 5-point stencil, deep-layer steering & IDW engine
+│   │   └── main.py                  # FastAPI application entrypoint
+│   ├── common/                      # Shared logging & configuration utilities
+│   ├── models/                      # PyTorch APMNowcastModel, ConvLSTM, UNet & baselines
+│   ├── preprocessing/               # ERA5, INSAT, Radar, Lightning & Zarr grid aligners
+│   ├── training/                    # Trainer, checkpoints & multi-metric evaluator (CSI/FSS/ECE)
+│   ├── tests/                       # 352 Pytest unit, physics & E2E integration tests
+│   └── requirements.txt
+├── frontend/
 │   ├── src/
-│   │   ├── api/              # Backend API client
-│   │   │   └── client.ts
-│   │   ├── components/       # UI Components
-│   │   │   └── HealthStatus.tsx  # Live backend status indicator
-│   │   ├── App.tsx           # Dashboard layout
-│   │   ├── main.tsx          # React application root
-│   │   └── index.css         # Styling
-│   ├── index.html            # HTML entrypoint
-│   ├── package.json          # Node dependencies & scripts
-│   ├── tsconfig.json         # TypeScript configuration
-│   └── vite.config.ts        # Vite build tool configuration
-├── data/                     # Data stores (excluded from git)
-│   ├── raw/                  # Raw INSAT, DWR, and Lightning feeds
-│   └── processed/            # Collocated grids and NetCDF/Zarr tensors
-├── deployment/               # Containerization & Deployment
-│   ├── Dockerfile.backend    # Backend container definition
-│   ├── Dockerfile.frontend   # Frontend container definition
-│   └── docker-compose.yml    # Multi-container orchestration
-└── research/                 # Scientific Notebooks & EDA
-    └── notebooks/            # Exploratory research notebooks
+│   │   ├── api/                     # Typed FastAPI client (nowcastApi.ts)
+│   │   ├── components/              # ForecastMap, Navbar, Sensor Dropout Simulator
+│   │   ├── types/                   # TypeScript meteorological interfaces
+│   │   ├── App.tsx
+│   │   └── index.css
+│   ├── package.json
+│   └── vite.config.ts
+├── .gitignore
+└── README.md
 ```
 
 ---
 
-## Getting Started
+## 🔄 Working Process
 
-### 1. Environment Configuration
-
-Copy the example configuration to `.env`:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-### 2. Backend Setup & Execution
-
-#### Activate the Virtual Environment:
-```powershell
-backend\.venv\Scripts\Activate.ps1
-```
-
-*(Or on Bash: `source backend/.venv/bin/activate`)*
-
-#### Install Dependencies:
-```powershell
-pip install -r backend/requirements.txt
-```
-
-#### Run the Backend Development Server:
-```powershell
-uvicorn app.main:app --reload --app-dir backend --host 127.0.0.1 --port 8000
-```
-
-- **Interactive API Documentation:** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Health Check Endpoint:** [http://localhost:8000/health](http://localhost:8000/health)
-
-#### Run Backend Automated Tests:
-```powershell
-backend\.venv\Scripts\pytest.exe backend/tests -v
-```
+1. **Atmospheric Ingestion:** Backend fetches live multi-level NWP fields (`CAPE`, `CIN`, `700 hPa RH`, `MSLP`, `10m` gusts, and `850/500/300 hPa` winds) across a 5-point `±1.0°` spatial stencil for strategic Pan-India nodes (or loads aligned Zarr/NetCDF multimodal cubes).
+2. **Physics & Steering Computation:** Outer-ring wind vectors cancel internal vortex spin to isolate true storm translation (`motionSpeedKmh`, `bearingDeg`), while moisture/pressure gates suppress false convection in dry capped air.
+3. **Adaptive Fusion & Uncertainty Estimation:** Active sensor masks weight Radar, Satellite, Lightning, and NWP attention; missing sensors trigger automatic weight renormalization and epistemic uncertainty inflation.
+4. **Spatial Interpolation & Regime Classification:** 3-node IDW interpolation computes continuous local telemetry for every coordinate, assigning physics-backed regime labels (`Cyclonic Cell` vs. `Stable Air Mass`).
+5. **Interactive Visualization:** FastAPI serves JSON snapshots to the React frontend for real-time map exploration, lead-time stepping, and sensor-dropout stress testing.
 
 ---
 
-### 3. Frontend Setup & Execution
+## 🧪 Installation
 
-#### Install Node Dependencies:
-```powershell
+### 1️⃣ Clone this repository
+```bash
+git clone [https://github.com/suhassrinivasa07/APM-Nowcast.git](https://github.com/suhassrinivasa07/APM-Nowcast.git)
+cd APM-Nowcast
+```
+
+### 2️⃣ Set up the Python backend environment
+```bash
+cd backend
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+# Linux / macOS
+source .venv/bin/activate
+
+pip install -r requirements.txt
+cd ..
+```
+
+### 3️⃣ Install frontend dependencies
+```bash
 cd frontend
 npm install
+cd ..
 ```
 
-#### Run the Frontend Development Server:
-```powershell
+---
+
+## ▶️ Running the Application
+
+### 4️⃣ Start the FastAPI backend (Terminal 1)
+```bash
+# Activate backend/.venv first, then run from repo root:
+uvicorn app.main:app --app-dir backend --reload --port 8000
+```
+
+### 5️⃣ Start the React + Vite frontend (Terminal 2)
+```bash
+cd frontend
 npm run dev
 ```
 
-The frontend dashboard will be available at [http://localhost:5173](http://localhost:5173).
+Then open in your browser:
+```text
+http://localhost:5173
+```
 
-#### Build for Production:
-```powershell
+---
+
+## ✅ Testing & Verification
+
+### Run the full backend test suite (352 tests)
+```bash
+# Windows (cmd)
+set PYTHONPATH=.
+pytest backend/tests -v
+
+# Linux / macOS / PowerShell
+PYTHONPATH=. pytest backend/tests -v
+```
+
+### Build the frontend production bundle
+```bash
+cd frontend
 npm run build
 ```
 
 ---
 
-### 4. Docker Deployment (Optional)
+## 🚀 Future Enhancements
 
-To spin up the containerized stack:
-
-```powershell
-docker-compose -f deployment/docker-compose.yml up --build
-```
+- 🛰️ **Live IMD Doppler Radar & MOSDAC INSAT Stream Ingestion** — Connect real-time radar volume scans and satellite brightness temperature feeds alongside Open-Meteo NWP
+- 📊 **Automated Benchmark Report Export** — Generate publication-ready Markdown/LaTeX verification tables (`CSI`, `POD`, `FAR`, `HSS`, `FSS`, `Brier`, `ECE`) across sensor-dropout ablations
+- ☁️ **Containerized Cloud Deployment** — Package FastAPI + Vite with Docker Compose for cloud GPU/CPU hosting
+- 🔔 **Threshold-Based Nowcast Webhooks** — Real-time alert triggers when convective initiation probability or flash density exceeds severe thresholds
 
 ---
 
-## 7-Day Research Prototype Roadmap
+## 📚 Credits / References
 
-| Day | Focus | Milestone |
-|---|---|---|
-| **Day 1** | **Project Foundation** | Modular architecture, FastAPI /health, React+TS frontend, test suite. |
-| **Day 2** | **Data Ingestion & Preprocessing** | INSAT-3D/3DR TIR & DWR grid collocation into normalized Xarray datasets. |
-| **Day 3** | **Physics-Guided Feature Engineering** | Instability indices (CAPE/CIN proxy), cloud-top cooling rate, echo-top height. |
-| **Day 4** | **Lightweight Multimodal Architecture** | Dual-branch ConvNeXt/U-Net backbone optimized for 4GB VRAM. |
-| **Day 5** | **Uncertainty Quantification & Training** | Evidential Deep Learning / MC Dropout for calibrated lightning risk. |
-| **Day 6** | **Inference Pipeline & Backend Integration** | Streaming nowcast generator (0-2 hour lead time) with GeoJSON/COG output. |
-| **Day 7** | **Interactive Visualization & Evaluation** | Leaflet radar overlay, CSI/HSS verification metrics, end-to-end demo. |
+- **Meteorological & NWP Data:** Open-Meteo Atmospheric Forecast API & ERA5 Reanalysis conventions
+- **Deep Learning & Verification:** PyTorch, ConvLSTM (Shi et al.), U-Net (Ronneberger et al.), FiLM (Perez et al.), Monte Carlo Dropout (Gal & Ghahramani), and Fractions Skill Score (Roberts & Lean)
+- **Geospatial & Web Stack:** FastAPI, React, TypeScript, Vite, and MapLibre GL
