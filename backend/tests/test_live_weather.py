@@ -926,3 +926,133 @@ class TestIDWInterpolation:
             f"IDW CAPE {result.cape:.1f} out of [{min(cape_values):.1f}, "
             f"{max(cape_values):.1f}] neighbour range"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestRegimeLabels
+# ---------------------------------------------------------------------------
+
+class TestRegimeLabels:
+    """Verify _format_regime_label produces physics-consistent cell names."""
+
+    # Import the helper lazily inside tests to avoid a module-level ImportError
+    # if the helper is renamed; keeps test isolation clean.
+    @staticmethod
+    def _label(region: str, severity: str, is_cyclonic: bool) -> str:
+        from app.services.inference_service import _format_regime_label
+        return _format_regime_label(region, severity, is_cyclonic)
+
+    # --- Calm / low-severity rules ---
+
+    def test_low_severity_non_cyclonic_returns_stable_air_mass(self):
+        label = self._label("Malabar Coast", "low", False)
+        assert label == "Malabar Coast Stable Air Mass", label
+
+    def test_low_severity_cyclonic_still_returns_stable_air_mass(self):
+        """Cyclonic flag does not override 'low' severity — calm stays calm."""
+        label = self._label("Northern Plains", "low", True)
+        assert label == "Northern Plains Stable Air Mass", label
+
+    # --- Moderate severity ---
+
+    def test_moderate_non_cyclonic_returns_developing_cell(self):
+        label = self._label("Telangana", "moderate", False)
+        assert label == "Telangana Developing Cell", label
+
+    def test_moderate_cyclonic_returns_cyclonic_band(self):
+        label = self._label("Coromandel Coast", "moderate", True)
+        assert label == "Coromandel Coast Cyclonic Band", label
+
+    # --- Severe / extreme severity ---
+
+    def test_severe_non_cyclonic_returns_convective_core(self):
+        label = self._label("Chota Nagpur", "severe", False)
+        assert label == "Chota Nagpur Convective Core", label
+
+    def test_extreme_non_cyclonic_returns_convective_core(self):
+        label = self._label("Mid-Gangetic Plains", "extreme", False)
+        assert label == "Mid-Gangetic Plains Convective Core", label
+
+    def test_severe_cyclonic_returns_cyclonic_cell(self):
+        label = self._label("Westcentral Bay of Bengal", "severe", True)
+        assert label == "Westcentral Bay of Bengal Cyclonic Cell", label
+
+    def test_extreme_cyclonic_returns_cyclonic_cell(self):
+        label = self._label("South Bay & Andaman", "extreme", True)
+        assert label == "South Bay & Andaman Cyclonic Cell", label
+
+    # --- Integration: cells returned by _build_cells respect physics labels ---
+
+    def test_build_cells_names_are_regime_driven(self):
+        """
+        _build_cells must not return any static archetype suffix
+        ("Squall Line", "Supercell Cluster") in the benchmark fallback path;
+        all names must end with one of the five physics-regime suffixes.
+        """
+        from app.services.inference_service import _build_cells
+
+        VALID_SUFFIXES = (
+            "Stable Air Mass",
+            "Developing Cell",
+            "Convective Core",
+            "Cyclonic Band",
+            "Cyclonic Cell",
+        )
+        BANNED_SUFFIXES = ("Squall Line", "Supercell Cluster")
+
+        # Force benchmark fallback by ensuring service is offline
+        with patch.object(httpx.Client, "get",
+                          side_effect=httpx.ConnectError("offline")):
+            live_weather_service.fetch_live_grid(force_refresh=True)
+
+        cells = _build_cells(horizon_step=0, inflation=1.0)
+        assert len(cells) > 0
+
+        for cell in cells:
+            name = cell["name"]
+            # Must end with a valid physics suffix
+            assert any(name.endswith(s) for s in VALID_SUFFIXES), (
+                f"Cell '{name}' does not end with a valid regime suffix"
+            )
+            # Must NOT contain banned static archetypes
+            for banned in BANNED_SUFFIXES:
+                assert banned not in name, (
+                    f"Cell name '{name}' still contains banned static label '{banned}'"
+                )
+
+    def test_low_severity_cell_has_stable_air_mass_label(self):
+        """
+        In the benchmark fallback, the Malabar Coast cell (baseProb=0.18, low)
+        must receive 'Stable Air Mass' label.
+        """
+        from app.services.inference_service import _build_cells
+
+        with patch.object(httpx.Client, "get",
+                          side_effect=httpx.ConnectError("offline")):
+            live_weather_service.fetch_live_grid(force_refresh=True)
+
+        cells = _build_cells(horizon_step=0, inflation=1.0)
+        malabar = next((c for c in cells if "cell-malabar" in c["id"]), None)
+        assert malabar is not None, "Malabar cell not found in _build_cells output"
+        assert malabar["name"].endswith("Stable Air Mass"), (
+            f"Expected 'Stable Air Mass' suffix for calm Malabar cell, got: '{malabar['name']}'"
+        )
+
+    def test_high_severity_marine_cell_has_cyclonic_label(self):
+        """
+        In the benchmark fallback, the Westcentral Bay of Bengal cell
+        (isMarine=True, baseProb=0.82 → severe/extreme) must receive
+        'Cyclonic Cell' or 'Cyclonic Band' label.
+        """
+        from app.services.inference_service import _build_cells
+
+        with patch.object(httpx.Client, "get",
+                          side_effect=httpx.ConnectError("offline")):
+            live_weather_service.fetch_live_grid(force_refresh=True)
+
+        cells = _build_cells(horizon_step=0, inflation=1.0)
+        bob = next((c for c in cells if "cell-westcentral-bob" in c["id"]), None)
+        assert bob is not None, "Westcentral BoB cell not found in _build_cells output"
+        assert "Cyclonic" in bob["name"], (
+            f"Expected 'Cyclonic' in label for active marine cell, got: '{bob['name']}'"
+        )

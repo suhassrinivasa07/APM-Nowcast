@@ -108,6 +108,7 @@ _BASE_CELLS = [
     {
         "id": "cell-chota-nagpur",
         "name": "Chota Nagpur Supercell Cluster",
+        "regionName": "Chota Nagpur",
         "lat": 23.45, "lon": 85.65, "radiusKm": 55,
         "baseProb": 0.88, "baseFlash": 24.5,
         "cape": 3200, "cin": 22, "growth": "intensifying",
@@ -116,6 +117,7 @@ _BASE_CELLS = [
     {
         "id": "cell-gangetic-plain",
         "name": "Mid-Gangetic Squall Line",
+        "regionName": "Mid-Gangetic Plains",
         "lat": 25.85, "lon": 84.80, "radiusKm": 75,
         "baseProb": 0.76, "baseFlash": 18.2,
         "cape": 2850, "cin": 35, "growth": "intensifying",
@@ -124,6 +126,7 @@ _BASE_CELLS = [
     {
         "id": "cell-assam-northeast",
         "name": "Brahmaputra Valley Convective Cell",
+        "regionName": "Brahmaputra Valley",
         "lat": 26.35, "lon": 92.45, "radiusKm": 48,
         "baseProb": 0.92, "baseFlash": 31.0,
         "cape": 3450, "cin": 15, "growth": "intensifying",
@@ -132,6 +135,7 @@ _BASE_CELLS = [
     {
         "id": "cell-western-ghats",
         "name": "Western Ghats Orographic Band",
+        "regionName": "Western Ghats",
         "lat": 18.95, "lon": 73.65, "radiusKm": 60,
         "baseProb": 0.65, "baseFlash": 11.4,
         "cape": 2100, "cin": 42, "growth": "steady",
@@ -140,6 +144,7 @@ _BASE_CELLS = [
     {
         "id": "cell-deccan-plateau",
         "name": "Telangana Pre-Monsoon Thunderstorm",
+        "regionName": "Telangana",
         "lat": 17.85, "lon": 79.20, "radiusKm": 50,
         "baseProb": 0.58, "baseFlash": 9.8,
         "cape": 1850, "cin": 55, "growth": "decaying",
@@ -148,6 +153,7 @@ _BASE_CELLS = [
     {
         "id": "cell-coastal-odisha",
         "name": "Mahanadi Basin Deep Convective Cell",
+        "regionName": "Mahanadi Basin",
         "lat": 20.65, "lon": 85.90, "radiusKm": 62,
         "baseProb": 0.81, "baseFlash": 21.0,
         "cape": 3050, "cin": 28, "growth": "intensifying",
@@ -156,6 +162,7 @@ _BASE_CELLS = [
     {
         "id": "cell-coromandel-coast",
         "name": "Coromandel Coastal Convective Band",
+        "regionName": "Coromandel Coast",
         "lat": 13.25, "lon": 80.45, "radiusKm": 54,
         "baseProb": 0.48, "baseFlash": 4.5,
         "cape": 1850, "cin": 32, "growth": "steady",
@@ -165,6 +172,7 @@ _BASE_CELLS = [
     {
         "id": "cell-malabar-coast",
         "name": "Malabar Orographic Convective Cell",
+        "regionName": "Malabar Coast",
         "lat": 10.15, "lon": 76.40, "radiusKm": 44,
         "baseProb": 0.18, "baseFlash": 0.45,
         "cape": 1380, "cin": 42, "growth": "decaying",
@@ -174,6 +182,7 @@ _BASE_CELLS = [
     {
         "id": "cell-andaman-sea",
         "name": "South Bay & Andaman Tropical Cell",
+        "regionName": "South Bay & Andaman",
         "lat": 11.85, "lon": 92.90, "radiusKm": 65,
         "baseProb": 0.84, "baseFlash": 22.0,
         "cape": 2750, "cin": 18, "growth": "intensifying",
@@ -183,6 +192,7 @@ _BASE_CELLS = [
     {
         "id": "cell-northern-plains",
         "name": "Northern Plains Convective Boundary",
+        "regionName": "Northern Plains",
         "lat": 28.75, "lon": 77.30, "radiusKm": 56,
         "baseProb": 0.35, "baseFlash": 3.2,
         "cape": 950, "cin": 85, "growth": "decaying",
@@ -192,6 +202,7 @@ _BASE_CELLS = [
     {
         "id": "cell-westcentral-bob",
         "name": "Westcentral Bay of Bengal Cyclonic Cell",
+        "regionName": "Westcentral Bay of Bengal",
         "lat": 13.35, "lon": 85.15, "radiusKm": 70,
         "baseProb": 0.82, "baseFlash": 22.5,
         "cape": 2650, "cin": 15, "growth": "intensifying",
@@ -201,6 +212,7 @@ _BASE_CELLS = [
     {
         "id": "cell-andhra-offshore",
         "name": "Andhra Offshore Deep Convective Cell",
+        "regionName": "Andhra Offshore",
         "lat": 15.65, "lon": 83.85, "radiusKm": 58,
         "baseProb": 0.78, "baseFlash": 18.5,
         "cape": 2520, "cin": 18, "growth": "intensifying",
@@ -270,6 +282,29 @@ def _compute_attention_and_inflation(
     return weights, min(inflation, 3.2)
 
 
+def _format_regime_label(region_name: str, severity: str, is_cyclonic: bool) -> str:
+    """
+    Return a physics-driven storm-cell name that reflects the live meteorological
+    regime instead of a static storm archetype.
+
+    Rules (checked top-down):
+      - Cyclonic + severe/extreme  → "<Region> Cyclonic Cell"
+      - Cyclonic + moderate        → "<Region> Cyclonic Band"
+      - Non-cyclonic severe/extreme → "<Region> Convective Core"
+      - Non-cyclonic moderate       → "<Region> Developing Cell"
+      - Low severity (calm air)     → "<Region> Stable Air Mass"
+    """
+    if is_cyclonic and severity in ("severe", "extreme"):
+        return f"{region_name} Cyclonic Cell"
+    if is_cyclonic and severity == "moderate":
+        return f"{region_name} Cyclonic Band"
+    if severity in ("severe", "extreme"):
+        return f"{region_name} Convective Core"
+    if severity == "moderate":
+        return f"{region_name} Developing Cell"
+    return f"{region_name} Stable Air Mass"
+
+
 def _build_cells(
     horizon_step: int, inflation: float
 ) -> List[Dict[str, Any]]:
@@ -310,6 +345,11 @@ def _build_cells(
             cell_cape = int(round(cond.cape))
             cell_cin = int(round(cond.cin))
             cell_wind = cond.wind_speed_10m
+
+            # Cyclonic flag: significant radial pressure drop detected by stencil
+            is_cyclonic = cond.stencil_delta_p >= 2.5 or cond.stencil_min_pressure_msl <= 1000.0
+            # Region name from live atmospheric grid node
+            region_name = cond.region or base.get("regionName", base["name"])
         else:
             # Benchmark fallback logic
             lat = base["lat"] + base["driftLat"] * (horizon_step + 0.2)
@@ -333,13 +373,22 @@ def _build_cells(
             else:
                 severity = "moderate"
 
+            # Cyclonic flag: marine cells with high baseline probability are
+            # likely cyclonic systems in the benchmark atmospheric cube
+            is_cyclonic = base.get("isMarine", False) and base["baseProb"] >= 0.75
+            region_name = base.get("regionName", base["name"])
+
+        # Physics-driven cell name reflecting the live meteorological regime
+        cell_name = _format_regime_label(region_name, severity, is_cyclonic)
+
         alea = min(0.85, 0.15 + horizon_step * 0.08)
         epis = min(0.95, (0.12 + horizon_step * 0.06) * inflation)
         total_unc = min(0.98, math.sqrt(alea ** 2 + epis ** 2))
 
         cells.append({
             "id": f"{base['id']}-h{horizon_step}",
-            "name": base["name"],
+            "name": cell_name,
+            "regionName": region_name,
             "lat": round(lat, 4),
             "lon": round(lon, 4),
             "radiusKm": base["radiusKm"] + horizon_step * 4,
@@ -368,20 +417,22 @@ def _build_alerts(cells: List[Dict[str, Any]], horizon_label: str) -> List[Dict[
     alerts = []
     for i, cell in enumerate(cells):
         if cell["severity"] in ("severe", "extreme"):
+            # Key off regionName (stable) rather than the dynamic name label
+            region_key = cell.get("regionName", cell["name"])
             affected_dwr = "DWR-PAT / DWR-KOL"
-            if "Chota" in cell["name"]:
+            if "Chota" in region_key:
                 affected_dwr = "DWR-PAT / DWR-KOL"
-            elif "Coromandel" in cell["name"]:
+            elif "Coromandel" in region_key:
                 affected_dwr = "DWR-CHE (Chennai)"
-            elif "Malabar" in cell["name"]:
+            elif "Malabar" in region_key:
                 affected_dwr = "DWR-MUM / DWR-CHE"
-            elif "Brahmaputra" in cell["name"]:
+            elif "Brahmaputra" in region_key:
                 affected_dwr = "DWR-MOH / DWR-KOL"
-            elif "Northern" in cell["name"]:
+            elif "Northern" in region_key:
                 affected_dwr = "DWR-DEL (Palam)"
-            elif "Western Ghats" in cell["name"]:
+            elif "Western Ghats" in region_key:
                 affected_dwr = "DWR-MUM (Colaba)"
-            elif "Telangana" in cell["name"]:
+            elif "Telangana" in region_key:
                 affected_dwr = "DWR-HYD (Begumpet)"
 
             alerts.append({
