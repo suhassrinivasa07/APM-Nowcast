@@ -116,10 +116,10 @@ def _mock_response(payload: List[Dict[str, Any]]) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 class TestGridPointsDefinition:
-    """Ensure the 18 Pan-India & Bay of Bengal meteorological grid points meet domain specs."""
+    """Ensure the 19 Pan-India & Bay of Bengal meteorological grid points meet domain specs."""
 
     def test_grid_point_count(self):
-        assert len(INDIA_MET_GRID_POINTS) == 18
+        assert len(INDIA_MET_GRID_POINTS) == 19
 
     def test_grid_points_within_pan_india_bounding_box(self):
         for pt in INDIA_MET_GRID_POINTS:
@@ -135,6 +135,7 @@ class TestGridPointsDefinition:
             "Ranchi / Chota Nagpur", "Nagpur", "Delhi NCR", "Jaipur",
             "Ahmedabad", "Andaman / Bay of Bengal", "Westcentral Bay of Bengal",
             "Off Andhra Coast", "Visakhapatnam", "Puri / Odisha Coast",
+            "Bihar / Mid-Gangetic Plains",
         }
         assert required.issubset(names)
 
@@ -223,7 +224,7 @@ class TestLiveWeatherServiceOfflineFallback:
                           side_effect=httpx.TimeoutException("timed out")):
             grid = live_weather_service.fetch_live_grid(force_refresh=True)
 
-        assert len(grid) == 18
+        assert len(grid) == 19
         assert live_weather_service.is_live is False
         for pt in grid.values():
             assert pt.cape >= 0.0
@@ -235,7 +236,7 @@ class TestLiveWeatherServiceOfflineFallback:
                           side_effect=httpx.ConnectError("unreachable")):
             grid = live_weather_service.fetch_live_grid(force_refresh=True)
 
-        assert len(grid) == 18
+        assert len(grid) == 19
         assert live_weather_service.is_live is False
 
     def test_http_500_fallback(self):
@@ -244,7 +245,7 @@ class TestLiveWeatherServiceOfflineFallback:
         with patch.object(httpx.Client, "get", return_value=mock):
             grid = live_weather_service.fetch_live_grid(force_refresh=True)
 
-        assert len(grid) == 18
+        assert len(grid) == 19
         assert live_weather_service.is_live is False
 
     def test_fallback_has_steering_winds(self):
@@ -278,12 +279,12 @@ class TestLiveWeatherServiceMockedFetch:
             )
         )
 
-    def test_successful_fetch_parses_all_18_nodes(self, generic_payload):
+    def test_successful_fetch_parses_all_19_nodes(self, generic_payload):
         with patch.object(httpx.Client, "get",
                           return_value=_mock_response(generic_payload)):
             grid = live_weather_service.fetch_live_grid(force_refresh=True)
 
-        assert len(grid) == 18
+        assert len(grid) == 19
         assert live_weather_service.is_live is True
 
     def test_live_source_marked(self, generic_payload):
@@ -381,8 +382,8 @@ class TestLiveWeatherServiceMockedFetch:
         with patch.object(httpx.Client, "get", return_value=_mock_response(payload)):
             grid = live_weather_service.fetch_live_grid(force_refresh=True)
 
-        # Must parse without raising and produce 18 valid nodes
-        assert len(grid) == 18
+        # Must parse without raising and produce 19 valid nodes
+        assert len(grid) == 19
         for pt in grid.values():
             assert not math.isnan(pt.cape)
             assert not math.isnan(pt.pressure_msl)
@@ -814,10 +815,10 @@ class TestApiLiveWeatherIntegration:
         resp = client.get("/api/v1/nowcast/live-weather")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["stationCount"] == 18
+        assert data["stationCount"] == 19
         assert "dataSource" in data
         assert "stations" in data
-        assert len(data["stations"]) == 18
+        assert len(data["stations"]) == 19
 
     def test_snapshot_includes_live_nwp_flag(self, client):
         resp = client.get("/api/v1/forecast/latest")
@@ -841,3 +842,87 @@ class TestApiLiveWeatherIntegration:
             assert cell["flashDensity"] >= 0.0
             assert "motionSpeedKmh" in cell
             assert "bearingDeg" in cell
+
+
+# ---------------------------------------------------------------------------
+# TestIDWInterpolation
+# ---------------------------------------------------------------------------
+
+class TestIDWInterpolation:
+    """Verify IDW blending returns distinct, physics-consistent telemetry
+    for nearby-but-distinct query points (Bihar vs. Jharkhand)."""
+
+    def test_bihar_vs_jharkhand_distinct_telemetry(self):
+        """
+        Bihar (25.46, 84.81) and Jharkhand/Ranchi (23.46, 85.66) are ~220 km
+        apart and must NOT return identical CAPE or steering-wind values when
+        their three nearest grid nodes differ (which they do in the benchmark
+        fallback, since the Bihar node and Ranchi node have distinct fallback
+        parameters).
+        """
+        with patch.object(httpx.Client, "get",
+                          side_effect=httpx.ConnectError("offline")):
+            live_weather_service.fetch_live_grid(force_refresh=True)
+
+        bihar = live_weather_service.get_nearest_conditions(25.46, 84.81)
+        jharkhand = live_weather_service.get_nearest_conditions(23.46, 85.66)
+
+        # The two query points are ~220 km apart; their IDW blends must differ.
+        assert (
+            abs(bihar.cape - jharkhand.cape) > 10.0
+            or abs(bihar.steering_speed_kmh - jharkhand.steering_speed_kmh) > 0.5
+            or abs(bihar.steering_dir_deg - jharkhand.steering_dir_deg) > 0.5
+        ), (
+            f"Bihar and Jharkhand returned identical telemetry — "
+            f"IDW is not differentiating (bihar.cape={bihar.cape:.1f}, "
+            f"jharkhand.cape={jharkhand.cape:.1f}, "
+            f"bihar.steering_speed={bihar.steering_speed_kmh:.1f}, "
+            f"jharkhand.steering_speed={jharkhand.steering_speed_kmh:.1f})"
+        )
+
+    def test_exact_node_query_fast_paths_chennai(self):
+        """Node-collocated query within 0.05° must return the exact node (fast-path)."""
+        with patch.object(httpx.Client, "get",
+                          side_effect=httpx.ConnectError("offline")):
+            live_weather_service.fetch_live_grid(force_refresh=True)
+
+        result = live_weather_service.get_nearest_conditions(13.1, 80.25)
+        assert result.id == "chennai", (
+            f"Expected chennai node via fast-path, got '{result.id}'"
+        )
+
+    def test_exact_node_query_fast_paths_delhi(self):
+        """Delhi query at (28.5, 77.1) must fast-path to the delhi node."""
+        with patch.object(httpx.Client, "get",
+                          side_effect=httpx.ConnectError("offline")):
+            live_weather_service.fetch_live_grid(force_refresh=True)
+
+        result = live_weather_service.get_nearest_conditions(28.5, 77.1)
+        assert result.id == "delhi", (
+            f"Expected delhi node via fast-path, got '{result.id}'"
+        )
+
+    def test_idw_result_cape_bounded_by_neighbours(self):
+        """IDW-blended CAPE must lie within [min, max] of the 3 nearest nodes."""
+        with patch.object(httpx.Client, "get",
+                          side_effect=httpx.ConnectError("offline")):
+            grid = live_weather_service.fetch_live_grid(force_refresh=True)
+
+        # Query a point away from all nodes (Mid-India interior)
+        query_lat, query_lon = 22.5, 82.0
+        result = live_weather_service.get_nearest_conditions(query_lat, query_lon)
+
+        # Find the 3 nearest nodes' CAPEs
+        import math as _math
+        ranked = sorted(
+            grid.values(),
+            key=lambda pt: (
+                (query_lat - pt.lat) ** 2
+                + ((query_lon - pt.lon) * _math.cos(_math.radians((query_lat + pt.lat) / 2.0))) ** 2
+            ),
+        )
+        cape_values = [pt.cape for pt in ranked[:3]]
+        assert min(cape_values) <= result.cape <= max(cape_values) + 1e-6, (
+            f"IDW CAPE {result.cape:.1f} out of [{min(cape_values):.1f}, "
+            f"{max(cape_values):.1f}] neighbour range"
+        )

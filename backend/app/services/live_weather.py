@@ -465,6 +465,35 @@ INDIA_MET_GRID_POINTS: List[Dict[str, Any]] = [
         "fallback_wind_speed_300": 46.0,
         "fallback_wind_dir_300": 102.0,
     },
+    # --- Added: Mid-Gangetic Plains / Bihar node (distinct from Ranchi/Jharkhand) ---
+    # Ranchi is at 23.34°N, 85.31°E (Chota Nagpur plateau, ~600 m elevation).
+    # This node covers the flat Gangetic alluvial plains of Bihar (~25.46°N, 85.0°E)
+    # which have distinctly different thermodynamics: higher low-level moisture,
+    # weaker CIN (flat terrain, no orographic cap), and a stronger land-river-breeze
+    # from the Ganga/Son confluence compared to the elevated Jharkhand plateau.
+    {
+        "id": "bihar_gangetic",
+        "name": "Bihar / Mid-Gangetic Plains",
+        "lat": 25.46,
+        "lon": 85.00,
+        "region": "Mid-Gangetic Plains",
+        "fallback_cape": 2200.0,
+        "fallback_cin": 32.0,
+        "fallback_precip": 0.8,
+        "fallback_cloud": 50.0,
+        "fallback_wind_speed": 22.0,
+        "fallback_wind_dir": 220.0,
+        "fallback_temp": 31.5,
+        "fallback_pressure_msl": 1010.5,
+        "fallback_wind_gusts": 30.0,
+        "fallback_rh700": 62.0,
+        "fallback_wind_speed_850": 20.0,
+        "fallback_wind_dir_850": 215.0,
+        "fallback_wind_speed_500": 28.0,
+        "fallback_wind_dir_500": 220.0,
+        "fallback_wind_speed_300": 42.0,
+        "fallback_wind_dir_300": 225.0,
+    },
 ]
 
 # Variables queried per stencil point (center + 4 ring points)
