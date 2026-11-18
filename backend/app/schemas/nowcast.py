@@ -54,6 +54,9 @@ class ConvectiveStormCell(BaseModel):
     cin: float = Field(..., description="J/kg")
     growthRate: Literal["intensifying", "steady", "decaying"]
     severity: Literal["low", "moderate", "severe", "extreme"]
+    motionSpeedKmh: Optional[float] = None
+    bearingDeg: Optional[float] = None
+    windSpeed10m: Optional[float] = None
 
 
 class ModalityAttentionWeights(BaseModel):
@@ -100,6 +103,8 @@ class NowcastSnapshot(BaseModel):
     thermodynamics: ThermodynamicState
     uncertaintyInflationFactor: float
     alerts: List[SevereAlert]
+    dataSource: Optional[str] = Field("live_nwp", description="Data source: 'live_nwp' or 'benchmark_cube'")
+    isLiveNwp: Optional[bool] = Field(True, description="True if real-time Open-Meteo NWP is active")
 
 
 # ---------------------------------------------------------------------------

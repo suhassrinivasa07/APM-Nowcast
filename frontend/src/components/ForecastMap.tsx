@@ -263,8 +263,13 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
       const rDeg = Math.max(cell.radiusKm / 111.32, 0.28);
 
       let weight = cell.occurrenceProb;
+      // Hide or de-emphasize calm < 25% cells from high-severity visual halos so
+      // the purple convective plume focuses on genuine active systems (Westcentral Bay of Bengal, South Bay, Coastal Andhra)
+      if (cell.occurrenceProb < 0.25) {
+        weight = cell.occurrenceProb * 0.10;
+      }
       if (currentMode === 'flash_density') {
-        weight = Math.min(1.0, (cell.flashDensity + 8) / 36);
+        weight = cell.occurrenceProb < 0.25 ? 0.0 : Math.min(1.0, (cell.flashDensity + 8) / 36);
       } else if (currentMode === 'uncertainty') {
         weight = cell.totalUncertainty;
       }
@@ -598,8 +603,13 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
     windPane.style.pointerEvents = 'none';
 
     const labelsPane = map.createPane('labelsPane');
-    labelsPane.style.zIndex = '650';
+    labelsPane.style.zIndex = '520';
     labelsPane.style.pointerEvents = 'none';
+
+    // Set Leaflet's built-in panes z-index order: markerPane 600, tooltipPane 900, popupPane 950
+    map.getPane('markerPane')!.style.zIndex = '600';
+    map.getPane('tooltipPane')!.style.zIndex = '900';
+    map.getPane('popupPane')!.style.zIndex = '950';
 
     // 2. Mount Heatmap & Wind Canvases directly inside Leaflet panes with explicit pixel dimensions
     const container = map.getContainer();
@@ -641,7 +651,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
       }
     ).addTo(map);
 
-    // 4. Esri Reference Boundaries & Places (Mounted in top labelsPane at z-index: 650 with opacity 0.9)
+    // 4. Esri Reference Boundaries & Places (Mounted in top labelsPane at z-index: 520 with opacity 0.9)
     L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
       {
@@ -750,11 +760,9 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
           font-family: ui-sans-serif, system-ui;
           min-width: 230px;
           padding: 8px 10px;
-          background: rgba(9, 13, 22, 0.96);
-          border: 1px solid rgba(148, 163, 184, 0.25);
+          background-color: #090d16;
+          border: 1px solid rgba(148, 163, 184, 0.35);
           border-radius: 8px;
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
           box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85);
           color: #f8fafc;
         ">
@@ -772,14 +780,14 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
             <div><span style="color: #94a3b8;">Occurrence:</span> <strong style="color: #facc15;">${Math.round(cell.occurrenceProb * 100)}%</strong></div>
             <div><span style="color: #94a3b8;">Flash Rate:</span> <strong style="color: #f43f5e;">${cell.flashDensity} fl/km²</strong></div>
           </div>
-          <div style="font-size: 10px; background: rgba(15, 23, 42, 0.8); border-radius: 6px; padding: 6px; border: 1px solid rgba(51, 65, 85, 0.6); line-height: 1.4;">
+          <div style="font-size: 10px; background-color: #0d121f; border-radius: 6px; padding: 6px; border: 1px solid rgba(51, 65, 85, 0.6); line-height: 1.4;">
             <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
               <span style="color: #94a3b8;">Thermodynamics:</span>
               <span>CAPE ${cell.cape} J/kg | CIN ${cell.cin} J/kg</span>
             </div>
             <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
               <span style="color: #94a3b8;">Motion Vector:</span>
-              <span style="color: #facc15;">${Math.round(traj?.speedKmH || 38)} km/h towards ${traj?.directionLabel || 'ENE'} (${traj?.bearingDeg || 68}°)</span>
+              <span style="color: #facc15;">${Math.round(cell.motionSpeedKmh !== undefined ? cell.motionSpeedKmh : (traj?.speedKmH || 18))} km/h towards ${traj?.directionLabel || 'ENE'} (${cell.bearingDeg !== undefined ? cell.bearingDeg : (traj?.bearingDeg || 68)}°)</span>
             </div>
             <div style="display: flex; justify-content: space-between;">
               <span style="color: #94a3b8;">Uncertainty (Total):</span>
@@ -803,8 +811,8 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
                 display: flex;
                 align-items: center;
                 gap: 5px;
-                background: rgba(9, 13, 22, 0.92);
-                border: 1px solid rgba(255, 255, 255, 0.22);
+                background-color: #090d16;
+                border: 1px solid rgba(148, 163, 184, 0.35);
                 border-left: 3px solid ${severityColor};
                 border-radius: 9999px;
                 padding: 2px 7px 2px 6px;
@@ -871,7 +879,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
       polyline.bindTooltip(
         `
-          <div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 6px 8px; background: rgba(9, 13, 22, 0.96); color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 6px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
+          <div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 6px 8px; background-color: #090d16; color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 6px;">
             <div style="font-weight: 700; color: #facc15;">⚡ ${vec.cellName} Trajectory</div>
             <div style="margin: 2px 0;">Velocity: <strong>${vec.speedKmH} km/h</strong> towards <strong>${vec.directionLabel} (${vec.bearingDeg}°)</strong></div>
             <div style="font-size: 10px; color: #94a3b8;">Extrapolated Path: T+0 → +15m → +30m → +45m → +60m</div>
@@ -897,7 +905,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
         dot.bindTooltip(
           `
-            <div style="font-size: 10px; font-weight: 600; padding: 3px 6px; background: rgba(9, 13, 22, 0.96); color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 4px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
+            <div style="font-size: 10px; font-weight: 600; padding: 3px 6px; background-color: #090d16; color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 4px;">
               ${vec.cellName.split(' ')[0]} @ <strong>${pt.label}</strong>
               <div style="color: #94a3b8; font-size: 9px;">${pt.lat.toFixed(2)}°N, ${pt.lon.toFixed(2)}°E</div>
             </div>
@@ -935,96 +943,130 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
     });
   }, [cells, showTrajectories, horizon]);
 
+// ---------------------------------------------------------------------------
+// Canonical IMD Doppler Weather Radar Network (11 Strategic Radar Stations)
+// ---------------------------------------------------------------------------
+const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
+  { id: 'DWR-MUM', name: 'Mumbai Colaba DWR', type: 'radar', lat: 18.8987, lon: 72.8094, status: 'online', rangeKm: 250, description: 'IMD S-band Radar - Arabian Sea Coastal & Western Ghats', band: 'S-band (2.7 GHz)' },
+  { id: 'DWR-CHE', name: 'Chennai Port DWR', type: 'radar', lat: 13.0827, lon: 80.2987, status: 'online', rangeKm: 250, description: 'IMD S-band Radar - Coromandel Coast convective monitoring', band: 'S-band (2.8 GHz)' },
+  { id: 'DWR-VSK', name: 'Visakhapatnam DWR', type: 'radar', lat: 17.6868, lon: 83.2185, status: 'online', rangeKm: 250, description: 'IMD S-band Radar - Andhra Coast & Bay of Bengal Cyclone Warning', band: 'S-band (2.8 GHz)' },
+  { id: 'DWR-MPT', name: 'Machilipatnam DWR', type: 'radar', lat: 16.1875, lon: 81.1389, status: 'online', rangeKm: 250, description: 'IMD S-band Radar - Krishna Basin & Central Bay of Bengal Coast', band: 'S-band (2.7 GHz)' },
+  { id: 'DWR-KOL', name: 'Kolkata DWR', type: 'radar', lat: 22.6547, lon: 88.4467, status: 'online', rangeKm: 250, description: 'IMD S-band Radar - Bay of Bengal Norwester corridor', band: 'S-band (2.8 GHz)' },
+  { id: 'DWR-PDP', name: 'Paradip DWR', type: 'radar', lat: 20.3167, lon: 86.6111, status: 'online', rangeKm: 250, description: 'IMD S-band Radar - Odisha Coast Cyclone Surveillance', band: 'S-band (2.8 GHz)' },
+  { id: 'DWR-HYD', name: 'Hyderabad Begumpet DWR', type: 'radar', lat: 17.4531, lon: 78.4677, status: 'online', rangeKm: 250, description: 'IMD C-band Radar - Deccan Plateau thunderstorm detection', band: 'C-band (5.6 GHz)' },
+  { id: 'DWR-BLR', name: 'Bengaluru DWR', type: 'radar', lat: 12.9538, lon: 77.5831, status: 'online', rangeKm: 250, description: 'IMD C-band Radar - South Peninsula Interior Convection', band: 'C-band (5.6 GHz)' },
+  { id: 'DWR-NGP', name: 'Nagpur DWR', type: 'radar', lat: 21.0922, lon: 79.0617, status: 'online', rangeKm: 250, description: 'IMD S-band Radar - Central India Meteorological Radar', band: 'S-band (2.8 GHz)' },
+  { id: 'DWR-DEL', name: 'New Delhi Palam DWR', type: 'radar', lat: 28.5665, lon: 77.1031, status: 'online', rangeKm: 250, description: 'IMD S-band Doppler Weather Radar - National Capital Region', band: 'S-band (2.7 GHz)' },
+  { id: 'DWR-GHY', name: 'Guwahati DWR', type: 'radar', lat: 26.1061, lon: 91.5859, status: 'online', rangeKm: 250, description: 'IMD S-band Radar - Brahmaputra Valley & Northeast Convection', band: 'S-band (2.7 GHz)' },
+];
+
   // =========================================================================
   // In-Place Update for Stations & DWR 250km Radar Rings
   // =========================================================================
   useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !mapReady) return;
+
+    // Ensure layer groups exist and are mounted directly to the Leaflet map
+    if (!stationLayerGroupRef.current) {
+      stationLayerGroupRef.current = L.layerGroup().addTo(map);
+    } else if (!map.hasLayer(stationLayerGroupRef.current)) {
+      stationLayerGroupRef.current.addTo(map);
+    }
+
+    if (!rangeRingsGroupRef.current) {
+      rangeRingsGroupRef.current = L.layerGroup().addTo(map);
+    } else if (!map.hasLayer(rangeRingsGroupRef.current)) {
+      rangeRingsGroupRef.current.addTo(map);
+    }
+
     const stGroup = stationLayerGroupRef.current;
     const ringGroup = rangeRingsGroupRef.current;
-    if (!stGroup || !ringGroup) return;
 
     stGroup.clearLayers();
     ringGroup.clearLayers();
 
-    if (!showStations) return;
+    // Combine prop stations with default IMD DWR network
+    const stationMap = new Map<string, SensorStation>();
+    IMD_DWR_DEFAULT_STATIONS.forEach((st) => stationMap.set(st.id, st));
+    (stations || []).forEach((st) => stationMap.set(st.id, st));
+    const effectiveStations = Array.from(stationMap.values());
 
-    stations.forEach((st) => {
-      let iconColor = '#38bdf8';
-      let iconSymbol = '📡';
-
-      if (st.type === 'satellite') {
-        iconColor = '#a855f7';
-        iconSymbol = '🛰️';
-      } else if (st.type === 'lightning') {
-        iconColor = '#eab308';
-        iconSymbol = '⚡';
-      }
-
-      // Subtle cyan-dashed 250km DWR radar rings
-      if (st.type === 'radar' && showRangeRings && st.status === 'online') {
-        L.circle([st.lat, st.lon], {
-          radius: st.rangeKm * 1000,
-          color: '#38bdf8',
-          weight: 1.2,
-          opacity: 0.45,
-          fillColor: '#38bdf8',
-          fillOpacity: 0.03,
-          dashArray: '4, 6',
-        }).addTo(ringGroup);
-
-        L.circle([st.lat, st.lon], {
-          radius: 100 * 1000,
-          color: '#38bdf8',
-          weight: 0.8,
-          opacity: 0.30,
-          fillOpacity: 0,
-          dashArray: '2, 5',
-        }).addTo(ringGroup);
-      }
-
-      const markerIcon = L.divIcon({
-        className: 'sensor-station-icon',
-        html: `
-          <div style="
-            width: 22px;
-            height: 22px;
-            border-radius: 50%;
-            background: rgba(15, 23, 42, 0.9);
-            border: 1.5px solid ${iconColor};
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 11px;
-            box-shadow: 0 0 10px ${iconColor}55;
-            cursor: pointer;
-            backdrop-filter: blur(4px);
-          ">
-            ${iconSymbol}
-          </div>
-        `,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11],
+    // 1. Render DWR 250km Range Rings whenever showRangeRings is true
+    if (showRangeRings) {
+      effectiveStations.forEach((st) => {
+        if (st.type === 'radar' && st.status === 'online') {
+          L.circle([st.lat, st.lon], {
+            radius: 250000,
+            color: '#38bdf8',
+            weight: 1.2,
+            dashArray: '5 5',
+            opacity: 0.55,
+            fillColor: '#38bdf8',
+            fillOpacity: 0.04,
+          }).addTo(ringGroup);
+        }
       });
+    }
 
-      const marker = L.marker([st.lat, st.lon], { icon: markerIcon });
-      marker.bindTooltip(
-        `
-          <div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 6px 8px; background: rgba(9, 13, 22, 0.96); color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 6px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
-            <div style="font-weight: 700; color: ${iconColor}; font-size: 12px; margin-bottom: 2px;">${st.name}</div>
-            <div style="color: #94a3b8; font-size: 10px; margin-bottom: 4px;">${st.description}</div>
-            <div style="display: flex; gap: 8px; font-size: 10px;">
-              <span style="color: #22c55e; font-weight: 600;">STATUS: ${st.status.toUpperCase()}</span>
-              ${st.band ? `<span style="color: #cbd5e1;">BAND: ${st.band}</span>` : ''}
-              ${st.type === 'radar' ? `<span style="color: #38bdf8;">RANGE: ${st.rangeKm} km</span>` : ''}
+    // 2. Render Station Markers whenever showStations is true
+    if (showStations) {
+      effectiveStations.forEach((st) => {
+        let iconColor = '#38bdf8';
+        let iconSymbol = '📡';
+
+        if (st.type === 'satellite') {
+          iconColor = '#a855f7';
+          iconSymbol = '🛰️';
+        } else if (st.type === 'lightning') {
+          iconColor = '#eab308';
+          iconSymbol = '⚡';
+        }
+
+        const markerIcon = L.divIcon({
+          className: 'sensor-station-icon',
+          html: `
+            <div style="
+              width: 22px;
+              height: 22px;
+              border-radius: 50%;
+              background: rgba(15, 23, 42, 0.9);
+              border: 1.5px solid ${iconColor};
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 11px;
+              box-shadow: 0 0 10px ${iconColor}55;
+              cursor: pointer;
+              backdrop-filter: blur(4px);
+            ">
+              ${iconSymbol}
             </div>
-          </div>
-        `,
-        { sticky: true, opacity: 1.0 }
-      );
+          `,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+        });
 
-      marker.addTo(stGroup);
-    });
-  }, [stations, showStations, showRangeRings]);
+        const marker = L.marker([st.lat, st.lon], { icon: markerIcon });
+        marker.bindTooltip(
+          `
+            <div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 6px 8px; background-color: #090d16; color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 6px;">
+              <div style="font-weight: 700; color: ${iconColor}; font-size: 12px; margin-bottom: 2px;">${st.name}</div>
+              <div style="color: #94a3b8; font-size: 10px; margin-bottom: 4px;">${st.description}</div>
+              <div style="display: flex; gap: 8px; font-size: 10px;">
+                <span style="color: #22c55e; font-weight: 600;">STATUS: ${st.status.toUpperCase()}</span>
+                ${st.band ? `<span style="color: #cbd5e1;">BAND: ${st.band}</span>` : ''}
+                ${st.type === 'radar' ? `<span style="color: #38bdf8;">RANGE: ${st.rangeKm} km</span>` : ''}
+              </div>
+            </div>
+          `,
+          { sticky: true, opacity: 1.0 }
+        );
+
+        marker.addTo(stGroup);
+      });
+    }
+  }, [stations, showStations, showRangeRings, mapReady]);
 
   // =========================================================================
   // Explicit User Navigation Handlers (Only places setView is called)
@@ -1070,7 +1112,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
           minHeight: '600px',
         }}
       >
-        {/* Leaflet Map Container (Mounts all layers in unified Leaflet stacking context: tilePane 200, heatmapPane 410, windPane 420, markerPane 600, labelsPane 650) */}
+        {/* Leaflet Map Container (Mounts all layers in unified Leaflet stacking context: tilePane 200, heatmapPane 410, windPane 420, labelsPane 520, markerPane 600, tooltipPane 900, popupPane 950) */}
         <div
           ref={mapContainerRef}
           style={{
@@ -1086,13 +1128,13 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
       {/* Unified Top Controls Overlay: Never overlaps, wraps cleanly on narrower viewports */}
       <div
-        className="absolute top-3 left-3 right-3 z-[800] flex flex-col gap-2 pointer-events-none"
+        className="absolute top-3 left-3 right-3 z-[1000] flex flex-col gap-2 pointer-events-none"
         style={{
           position: 'absolute',
           top: '12px',
           left: '12px',
           right: '12px',
-          zIndex: 800,
+          zIndex: 1000,
           pointerEvents: 'none',
           display: 'flex',
           flexDirection: 'column',
@@ -1113,7 +1155,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
         >
           {/* Mode Switcher Pill */}
           <div
-            className="pointer-events-auto"
+            className="pointer-events-auto py-1 px-2 text-xs"
             style={{
               pointerEvents: 'auto',
               background: 'rgba(15, 23, 42, 0.92)',
@@ -1121,7 +1163,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
               WebkitBackdropFilter: 'blur(10px)',
               border: '1px solid rgba(51, 65, 85, 0.9)',
               borderRadius: '8px',
-              padding: '5px 8px',
+              padding: '4px 6px',
               display: 'flex',
               flexWrap: 'wrap',
               alignItems: 'center',
@@ -1131,11 +1173,12 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
           >
             <button
               onClick={() => onOverlayModeChange('probability')}
+              className="py-1 px-2 text-xs"
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '5px 10px',
+                padding: '4px 8px',
                 fontSize: '12px',
                 fontWeight: 600,
                 borderRadius: '6px',
@@ -1152,11 +1195,12 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
             <button
               onClick={() => onOverlayModeChange('flash_density')}
+              className="py-1 px-2 text-xs"
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '5px 10px',
+                padding: '4px 8px',
                 fontSize: '12px',
                 fontWeight: 600,
                 borderRadius: '6px',
@@ -1173,11 +1217,12 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
             <button
               onClick={() => onOverlayModeChange('uncertainty')}
+              className="py-1 px-2 text-xs"
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '5px 10px',
+                padding: '4px 8px',
                 fontSize: '12px',
                 fontWeight: 600,
                 borderRadius: '6px',
@@ -1195,7 +1240,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
           {/* Layer Toggle Bar Pill */}
           <div
-            className="pointer-events-auto"
+            className="pointer-events-auto py-1 px-2 text-xs"
             style={{
               pointerEvents: 'auto',
               background: 'rgba(15, 23, 42, 0.92)',
@@ -1203,12 +1248,12 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
               WebkitBackdropFilter: 'blur(10px)',
               border: '1px solid rgba(51, 65, 85, 0.9)',
               borderRadius: '8px',
-              padding: '5px 10px',
+              padding: '4px 8px',
               display: 'flex',
               flexWrap: 'wrap',
               alignItems: 'center',
               gap: '10px',
-              fontSize: '11px',
+              fontSize: '12px',
               color: '#cbd5e1',
               boxShadow: '0 8px 24px rgba(0, 0, 0, 0.55)',
             }}
@@ -1217,6 +1262,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
             <button
               onClick={() => setIs3DMode(!is3DMode)}
               title="Toggle 3D Perspective Tilt"
+              className="py-1 px-2 text-xs"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1227,7 +1273,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
                 padding: '3px 7px',
                 color: '#f8fafc',
                 cursor: 'pointer',
-                fontSize: '11px',
+                fontSize: '12px',
                 fontWeight: 600,
                 transition: 'all 0.2s',
               }}
@@ -1306,6 +1352,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
             <button
               onClick={resetView}
               title="Reset to Pan-India Overview (22.5°N, 79.0°E, Zoom 5)"
+              className="py-1 px-2 text-xs"
               style={{
                 background: '#1e293b',
                 border: '1px solid #475569',
@@ -1316,7 +1363,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 gap: '4px',
-                fontSize: '11px',
+                fontSize: '12px',
                 transition: 'background 0.2s',
               }}
             >
@@ -1328,7 +1375,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
         {/* Row 2: Sub-Region Selector cleanly below without hardcoded top offset */}
         <div
-          className="pointer-events-auto mt-1"
+          className="pointer-events-auto mt-1 py-1 px-2 text-xs"
           style={{
             pointerEvents: 'auto',
             background: 'rgba(15, 23, 42, 0.90)',
@@ -1341,7 +1388,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
             alignItems: 'center',
             gap: '6px',
             boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
-            fontSize: '11px',
+            fontSize: '12px',
             width: 'fit-content',
           }}
         >
@@ -1483,10 +1530,8 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
             bottom: '24px',
             right: '14px',
             zIndex: 1000,
-            background: 'rgba(15, 23, 42, 0.95)',
-            backdropFilter: 'blur(12px)',
-            WebkitBackdropFilter: 'blur(12px)',
-            border: '1px solid #0284c7',
+            backgroundColor: '#090d16',
+            border: '1px solid rgba(148, 163, 184, 0.35)',
             borderRadius: '10px',
             padding: '12px 14px',
             width: '280px',

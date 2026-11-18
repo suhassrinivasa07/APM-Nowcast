@@ -19,12 +19,14 @@ interface NavbarProps {
   isSimulationMode: boolean;
   onToggleSimulationMode: () => void;
   isBackendOnline: boolean;
+  isLiveNwp?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   isSimulationMode,
   onToggleSimulationMode,
   isBackendOnline,
+  isLiveNwp,
 }) => {
   const [utcTime, setUtcTime] = useState<string>('');
 
@@ -141,8 +143,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={onToggleSimulationMode}
           title="Toggle between Live FastAPI Backend and Offline Simulation Mode"
           style={{
-            background: isSimulationMode ? '#1e293b' : '#0284c7',
-            border: isSimulationMode ? '1px solid #facc15' : '1px solid #38bdf8',
+            background: isSimulationMode ? '#1e293b' : isLiveNwp ? '#0284c7' : '#1e293b',
+            border: isSimulationMode
+              ? '1px solid #facc15'
+              : isLiveNwp
+              ? '1px solid #38bdf8'
+              : '1px solid #64748b',
             borderRadius: '6px',
             padding: '5px 12px',
             color: '#ffffff',
@@ -160,10 +166,15 @@ export const Navbar: React.FC<NavbarProps> = ({
               <ToggleRight size={16} color="#facc15" />
               <span>Mode: <strong style={{ color: '#facc15' }}>Simulation Mode (Synthetic Data)</strong></span>
             </>
-          ) : (
+          ) : isLiveNwp ? (
             <>
               <ToggleLeft size={16} color="#38bdf8" />
-              <span>Mode: <strong style={{ color: '#38bdf8' }}>Live FastAPI Backend</strong></span>
+              <span>Mode: <strong style={{ color: '#38bdf8' }}>Live FastAPI + Real-Time NWP</strong></span>
+            </>
+          ) : (
+            <>
+              <ToggleLeft size={16} color="#cbd5e1" />
+              <span>Mode: <strong style={{ color: '#cbd5e1' }}>Benchmark Cube Fallback</strong></span>
             </>
           )}
         </button>

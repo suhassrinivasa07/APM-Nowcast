@@ -20,6 +20,7 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.schemas.health import HealthResponse
 from app.services.inference_service import inference_service
+from app.services.live_weather import live_weather_service
 
 
 # ---------------------------------------------------------------------------
@@ -27,9 +28,14 @@ from app.services.inference_service import inference_service
 # ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialise the NowcastInferenceService (loads or builds the model)."""
+    """Initialise NowcastInferenceService and warm up live Open-Meteo weather grid."""
     checkpoint_dir = os.environ.get("CHECKPOINT_DIR", None)
     inference_service.initialize(checkpoint_dir=checkpoint_dir)
+    # Warm up live weather grid asynchronously (graceful fallback if offline)
+    try:
+        await live_weather_service.fetch_live_grid_async()
+    except Exception:
+        pass
     yield
     # Teardown: nothing required for in-process PyTorch model
 
@@ -98,6 +104,7 @@ async def root():
         "service": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "status": "operational",
+        "live_nwp": "active" if live_weather_service.is_live else "benchmark_cube_fallback",
         "docs": "/docs",
         "health": "/health",
     }

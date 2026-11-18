@@ -45,6 +45,9 @@ export interface ConvectiveStormCell {
   cin: number; // J/kg
   growthRate: 'intensifying' | 'steady' | 'decaying';
   severity: 'low' | 'moderate' | 'severe' | 'extreme';
+  motionSpeedKmh?: number;
+  bearingDeg?: number;
+  windSpeed10m?: number;
 }
 
 export interface ModalityAttentionWeights {
@@ -96,6 +99,8 @@ export interface NowcastSnapshot {
   thermodynamics: ThermodynamicState;
   uncertaintyInflationFactor: number; // 1.0x (all online) to 3.2x (blackout)
   alerts: SevereAlert[];
+  dataSource?: string;
+  isLiveNwp?: boolean;
 }
 
 export interface SubRegionPreset {

@@ -212,6 +212,7 @@ export const App: React.FC = () => {
         isSimulationMode={isSimulationMode}
         onToggleSimulationMode={handleToggleSimulationMode}
         isBackendOnline={isBackendOnline}
+        isLiveNwp={Boolean(snapshot?.isLiveNwp ?? (snapshot?.dataSource === 'live_nwp'))}
       />
 
       {/* Main Command Dashboard Layout */}

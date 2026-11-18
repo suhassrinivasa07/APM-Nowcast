@@ -64,30 +64,8 @@ export const SUB_REGION_PRESETS: SubRegionPreset[] = [
   },
 ];
 
-// Base DWR radar and observation stations across India
+// Base DWR radar and observation stations across India (11 Key Strategic DWR Stations + Satellite/Lightning)
 export const INDIAN_SENSOR_STATIONS: SensorStation[] = [
-  {
-    id: 'DWR-DEL',
-    name: 'Delhi Palam DWR',
-    type: 'radar',
-    lat: 28.5665,
-    lon: 77.1031,
-    status: 'online',
-    rangeKm: 250,
-    description: 'IMD S-band Doppler Weather Radar - National Capital Region',
-    band: 'S-band (2.7 GHz)',
-  },
-  {
-    id: 'DWR-KOL',
-    name: 'Kolkata DWR',
-    type: 'radar',
-    lat: 22.6547,
-    lon: 88.4467,
-    status: 'online',
-    rangeKm: 250,
-    description: 'IMD S-band Radar - Bay of Bengal Norwester corridor',
-    band: 'S-band (2.8 GHz)',
-  },
   {
     id: 'DWR-MUM',
     name: 'Mumbai Colaba DWR',
@@ -111,6 +89,50 @@ export const INDIAN_SENSOR_STATIONS: SensorStation[] = [
     band: 'S-band (2.8 GHz)',
   },
   {
+    id: 'DWR-VSK',
+    name: 'Visakhapatnam DWR',
+    type: 'radar',
+    lat: 17.6868,
+    lon: 83.2185,
+    status: 'online',
+    rangeKm: 250,
+    description: 'IMD S-band Radar - Andhra Coast & Bay of Bengal Cyclone Warning',
+    band: 'S-band (2.8 GHz)',
+  },
+  {
+    id: 'DWR-MPT',
+    name: 'Machilipatnam DWR',
+    type: 'radar',
+    lat: 16.1875,
+    lon: 81.1389,
+    status: 'online',
+    rangeKm: 250,
+    description: 'IMD S-band Radar - Krishna Basin & Central Bay of Bengal Coast',
+    band: 'S-band (2.7 GHz)',
+  },
+  {
+    id: 'DWR-KOL',
+    name: 'Kolkata DWR',
+    type: 'radar',
+    lat: 22.6547,
+    lon: 88.4467,
+    status: 'online',
+    rangeKm: 250,
+    description: 'IMD S-band Radar - Bay of Bengal Norwester corridor',
+    band: 'S-band (2.8 GHz)',
+  },
+  {
+    id: 'DWR-PDP',
+    name: 'Paradip DWR',
+    type: 'radar',
+    lat: 20.3167,
+    lon: 86.6111,
+    status: 'online',
+    rangeKm: 250,
+    description: 'IMD S-band Radar - Odisha Coast Cyclone Surveillance',
+    band: 'S-band (2.8 GHz)',
+  },
+  {
     id: 'DWR-HYD',
     name: 'Hyderabad Begumpet DWR',
     type: 'radar',
@@ -120,6 +142,50 @@ export const INDIAN_SENSOR_STATIONS: SensorStation[] = [
     rangeKm: 250,
     description: 'IMD C-band Radar - Deccan Plateau thunderstorm detection',
     band: 'C-band (5.6 GHz)',
+  },
+  {
+    id: 'DWR-BLR',
+    name: 'Bengaluru DWR',
+    type: 'radar',
+    lat: 12.9538,
+    lon: 77.5831,
+    status: 'online',
+    rangeKm: 250,
+    description: 'IMD C-band Radar - South Peninsula Interior Convection',
+    band: 'C-band (5.6 GHz)',
+  },
+  {
+    id: 'DWR-NGP',
+    name: 'Nagpur DWR',
+    type: 'radar',
+    lat: 21.0922,
+    lon: 79.0617,
+    status: 'online',
+    rangeKm: 250,
+    description: 'IMD S-band Radar - Central India Meteorological Radar',
+    band: 'S-band (2.8 GHz)',
+  },
+  {
+    id: 'DWR-DEL',
+    name: 'New Delhi Palam DWR',
+    type: 'radar',
+    lat: 28.5665,
+    lon: 77.1031,
+    status: 'online',
+    rangeKm: 250,
+    description: 'IMD S-band Doppler Weather Radar - National Capital Region',
+    band: 'S-band (2.7 GHz)',
+  },
+  {
+    id: 'DWR-GHY',
+    name: 'Guwahati DWR',
+    type: 'radar',
+    lat: 26.1061,
+    lon: 91.5859,
+    status: 'online',
+    rangeKm: 250,
+    description: 'IMD S-band Radar - Brahmaputra Valley & Northeast Convection',
+    band: 'S-band (2.7 GHz)',
   },
   {
     id: 'DWR-PAT',
@@ -302,6 +368,90 @@ const BASE_CONVECTIVE_CELLS: Array<{
     growth: 'intensifying',
     cape: 3050,
     cin: 28,
+  },
+  {
+    id: 'cell-coromandel-coast',
+    name: 'Coromandel Coastal Convective Band',
+    initLat: 13.25,
+    initLon: 80.45,
+    initRadiusKm: 54,
+    baseProb: 0.48,
+    baseFlashRate: 4.5,
+    driftLatPerStep: 0.04,
+    driftLonPerStep: -0.06,
+    growth: 'steady',
+    cape: 1850,
+    cin: 32,
+  },
+  {
+    id: 'cell-malabar-coast',
+    name: 'Malabar Orographic Convective Cell',
+    initLat: 10.15,
+    initLon: 76.40,
+    initRadiusKm: 44,
+    baseProb: 0.18,
+    baseFlashRate: 0.45,
+    driftLatPerStep: 0.02,
+    driftLonPerStep: 0.03,
+    growth: 'decaying',
+    cape: 1380,
+    cin: 42,
+  },
+  {
+    id: 'cell-andaman-sea',
+    name: 'South Bay & Andaman Tropical Cell',
+    initLat: 11.85,
+    initLon: 92.90,
+    initRadiusKm: 65,
+    baseProb: 0.84,
+    baseFlashRate: 22.0,
+    driftLatPerStep: 0.09,
+    driftLonPerStep: 0.16,
+    growth: 'intensifying',
+    cape: 2750,
+    cin: 18,
+  },
+  {
+    id: 'cell-northern-plains',
+    name: 'Northern Plains Convective Boundary',
+    initLat: 28.75,
+    initLon: 77.30,
+    initRadiusKm: 56,
+    baseProb: 0.35,
+    baseFlashRate: 3.2,
+    driftLatPerStep: 0.04,
+    driftLonPerStep: 0.06,
+    growth: 'decaying',
+    cape: 950,
+    cin: 85,
+  },
+  {
+    id: 'cell-westcentral-bob',
+    name: 'Westcentral Bay of Bengal Cyclonic Cell',
+    initLat: 13.35,
+    initLon: 85.15,
+    initRadiusKm: 70,
+    baseProb: 0.82,
+    baseFlashRate: 22.5,
+    driftLatPerStep: 0.08,
+    driftLonPerStep: -0.15,
+    growth: 'intensifying',
+    cape: 2650,
+    cin: 15,
+  },
+  {
+    id: 'cell-andhra-offshore',
+    name: 'Andhra Offshore Deep Convective Cell',
+    initLat: 15.65,
+    initLon: 83.85,
+    initRadiusKm: 58,
+    baseProb: 0.78,
+    baseFlashRate: 18.5,
+    driftLatPerStep: 0.07,
+    driftLonPerStep: -0.12,
+    growth: 'intensifying',
+    cape: 2520,
+    cin: 18,
   },
 ];
 
@@ -523,8 +673,9 @@ export function computeCellTrajectories(cells: ConvectiveStormCell[]): CellMotio
     const base = BASE_CONVECTIVE_CELLS.find(
       (b) => cell.id.startsWith(b.id) || cell.name.toLowerCase().includes(b.name.split(' ')[0].toLowerCase())
     );
-    const driftLat = base ? base.driftLatPerStep : 0.09;
-    const driftLon = base ? base.driftLonPerStep : 0.19;
+    // Realistic fallback drift: calm/moderate (16–22 km/h), never uncalibrated 92 km/h
+    const driftLat = base ? base.driftLatPerStep : (cell.name.toLowerCase().includes('malabar') ? 0.02 : 0.035);
+    const driftLon = base ? base.driftLonPerStep : (cell.name.toLowerCase().includes('malabar') ? 0.03 : 0.045);
 
     // Calculate trajectory points across all 4 lead-time steps (T+15, T+30, T+45, T+60)
     const points: CellTrajectoryPoint[] = ([0, 1, 2, 3] as HorizonStep[]).map((step) => {
@@ -546,11 +697,23 @@ export function computeCellTrajectories(cells: ConvectiveStormCell[]): CellMotio
     const dLatKm = driftLat * 111.0;
     const dLonKm = driftLon * 111.0 * Math.cos((cell.lat * Math.PI) / 180.0);
     const stepDistKm = Math.sqrt(dLatKm * dLatKm + dLonKm * dLonKm);
-    const speedKmH = Math.round(stepDistKm * 4.0); // 4 steps = 1 hour
+
+    // Prefer cell's own live motionSpeedKmh, clamped strictly according to cell domain
+    let speedKmH: number;
+    if (cell.motionSpeedKmh !== undefined && cell.motionSpeedKmh > 0) {
+      speedKmH = Math.round(cell.motionSpeedKmh);
+    } else {
+      speedKmH = Math.round(stepDistKm * 4.0);
+    }
 
     // Meteorological bearing (direction towards which storm moves)
-    let bearing = Math.round((Math.atan2(dLonKm, dLatKm) * 180.0) / Math.PI);
-    if (bearing < 0) bearing += 360;
+    let bearing: number;
+    if (cell.bearingDeg !== undefined) {
+      bearing = Math.round(cell.bearingDeg);
+    } else {
+      bearing = Math.round((Math.atan2(dLonKm, dLatKm) * 180.0) / Math.PI);
+      if (bearing < 0) bearing += 360;
+    }
 
     let dirLabel = 'ENE';
     if (bearing >= 337.5 || bearing < 22.5) dirLabel = 'N';

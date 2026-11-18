@@ -26,6 +26,7 @@ from common.logging_config import get_logger
 from datacube.schema import MODALITY_ORDER, NUM_MODALITIES
 from models.apm_nowcast import APMNowcastModel
 from training.checkpoint import CheckpointManager
+from app.services.live_weather import live_weather_service
 
 log = get_logger(__name__)
 
@@ -101,6 +102,7 @@ BENCHMARK_DATA: List[Dict[str, Any]] = [
 
 # ---------------------------------------------------------------------------
 # Synthetic storm cells for snapshot endpoints (mirrors nowcastApi.ts seeds)
+# Expanded to cover Pan-India, including coastal Northeast Monsoon & South/Islands
 # ---------------------------------------------------------------------------
 _BASE_CELLS = [
     {
@@ -151,17 +153,78 @@ _BASE_CELLS = [
         "cape": 3050, "cin": 28, "growth": "intensifying",
         "driftLat": 0.09, "driftLon": 0.20,
     },
+    {
+        "id": "cell-coromandel-coast",
+        "name": "Coromandel Coastal Convective Band",
+        "lat": 13.25, "lon": 80.45, "radiusKm": 54,
+        "baseProb": 0.48, "baseFlash": 4.5,
+        "cape": 1850, "cin": 32, "growth": "steady",
+        "driftLat": 0.04, "driftLon": -0.06,
+        "isMarine": False,
+    },
+    {
+        "id": "cell-malabar-coast",
+        "name": "Malabar Orographic Convective Cell",
+        "lat": 10.15, "lon": 76.40, "radiusKm": 44,
+        "baseProb": 0.18, "baseFlash": 0.45,
+        "cape": 1380, "cin": 42, "growth": "decaying",
+        "driftLat": 0.02, "driftLon": 0.03,
+        "isMarine": False,
+    },
+    {
+        "id": "cell-andaman-sea",
+        "name": "South Bay & Andaman Tropical Cell",
+        "lat": 11.85, "lon": 92.90, "radiusKm": 65,
+        "baseProb": 0.84, "baseFlash": 22.0,
+        "cape": 2750, "cin": 18, "growth": "intensifying",
+        "driftLat": 0.09, "driftLon": 0.16,
+        "isMarine": True,
+    },
+    {
+        "id": "cell-northern-plains",
+        "name": "Northern Plains Convective Boundary",
+        "lat": 28.75, "lon": 77.30, "radiusKm": 56,
+        "baseProb": 0.35, "baseFlash": 3.2,
+        "cape": 950, "cin": 85, "growth": "decaying",
+        "driftLat": 0.04, "driftLon": 0.06,
+        "isMarine": False,
+    },
+    {
+        "id": "cell-westcentral-bob",
+        "name": "Westcentral Bay of Bengal Cyclonic Cell",
+        "lat": 13.35, "lon": 85.15, "radiusKm": 70,
+        "baseProb": 0.82, "baseFlash": 22.5,
+        "cape": 2650, "cin": 15, "growth": "intensifying",
+        "driftLat": 0.08, "driftLon": -0.15,
+        "isMarine": True,
+    },
+    {
+        "id": "cell-andhra-offshore",
+        "name": "Andhra Offshore Deep Convective Cell",
+        "lat": 15.65, "lon": 83.85, "radiusKm": 58,
+        "baseProb": 0.78, "baseFlash": 18.5,
+        "cape": 2520, "cin": 18, "growth": "intensifying",
+        "driftLat": 0.07, "driftLon": -0.12,
+        "isMarine": True,
+    },
 ]
 
-# DWR + satellite + lightning stations (mirrors nowcastApi.ts)
+# IMD DWR Radar Network (11 Key Strategic Radar Stations + Regional Radars)
+# & Satellite / Lightning Modalities
 _STATIONS = [
-    {"id": "DWR-DEL", "name": "Delhi Palam DWR", "type": "radar", "lat": 28.5665, "lon": 77.1031, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - NCR", "band": "S-band (2.7 GHz)"},
-    {"id": "DWR-KOL", "name": "Kolkata DWR", "type": "radar", "lat": 22.6547, "lon": 88.4467, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Bay of Bengal", "band": "S-band (2.8 GHz)"},
     {"id": "DWR-MUM", "name": "Mumbai Colaba DWR", "type": "radar", "lat": 18.8987, "lon": 72.8094, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Arabian Sea", "band": "S-band (2.7 GHz)"},
-    {"id": "DWR-CHE", "name": "Chennai Port DWR", "type": "radar", "lat": 13.0827, "lon": 80.2987, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Coromandel", "band": "S-band (2.8 GHz)"},
+    {"id": "DWR-CHE", "name": "Chennai Port DWR", "type": "radar", "lat": 13.0827, "lon": 80.2987, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Coromandel Coast", "band": "S-band (2.8 GHz)"},
+    {"id": "DWR-VSK", "name": "Visakhapatnam DWR", "type": "radar", "lat": 17.6868, "lon": 83.2185, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Andhra Coast", "band": "S-band (2.8 GHz)"},
+    {"id": "DWR-MPT", "name": "Machilipatnam DWR", "type": "radar", "lat": 16.1875, "lon": 81.1389, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Krishna Basin", "band": "S-band (2.7 GHz)"},
+    {"id": "DWR-KOL", "name": "Kolkata DWR", "type": "radar", "lat": 22.6547, "lon": 88.4467, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Bay of Bengal", "band": "S-band (2.8 GHz)"},
+    {"id": "DWR-PDP", "name": "Paradip DWR", "type": "radar", "lat": 20.3167, "lon": 86.6111, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Odisha Coast", "band": "S-band (2.8 GHz)"},
     {"id": "DWR-HYD", "name": "Hyderabad Begumpet DWR", "type": "radar", "lat": 17.4531, "lon": 78.4677, "status": "online", "rangeKm": 250, "description": "IMD C-band Radar - Deccan Plateau", "band": "C-band (5.6 GHz)"},
+    {"id": "DWR-BLR", "name": "Bengaluru DWR", "type": "radar", "lat": 12.9538, "lon": 77.5831, "status": "online", "rangeKm": 250, "description": "IMD C-band Radar - South Peninsula", "band": "C-band (5.6 GHz)"},
+    {"id": "DWR-NGP", "name": "Nagpur DWR", "type": "radar", "lat": 21.0922, "lon": 79.0617, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Central India", "band": "S-band (2.8 GHz)"},
+    {"id": "DWR-DEL", "name": "New Delhi Palam DWR", "type": "radar", "lat": 28.5665, "lon": 77.1031, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - NCR & Northern Plains", "band": "S-band (2.7 GHz)"},
+    {"id": "DWR-GHY", "name": "Guwahati DWR", "type": "radar", "lat": 26.1061, "lon": 91.5859, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Brahmaputra Valley", "band": "S-band (2.7 GHz)"},
     {"id": "DWR-PAT", "name": "Patna DWR", "type": "radar", "lat": 25.5941, "lon": 85.1376, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Gangetic", "band": "S-band (2.7 GHz)"},
-    {"id": "DWR-MOH", "name": "Mohanbari Dibrugarh DWR", "type": "radar", "lat": 27.4839, "lon": 95.0177, "status": "online", "rangeKm": 250, "description": "IMD C-band Radar - Assam Valley", "band": "C-band (5.6 GHz)"},
+    {"id": "DWR-MOH", "name": "Mohanbari Dibrugarh DWR", "type": "radar", "lat": 27.4839, "lon": 95.0177, "status": "online", "rangeKm": 250, "description": "IMD C-band Radar - Upper Assam", "band": "C-band (5.6 GHz)"},
     {"id": "DWR-BHO", "name": "Bhopal DWR", "type": "radar", "lat": 23.2599, "lon": 77.4126, "status": "online", "rangeKm": 250, "description": "IMD S-band Radar - Central India", "band": "S-band (2.8 GHz)"},
     {"id": "SAT-INSAT3DR", "name": "INSAT-3DR Geostationary Imager", "type": "satellite", "lat": 0.0, "lon": 74.0, "status": "online", "rangeKm": 2800, "description": "ISRO MOSDAC 74.0°E - TIR-1/WV 15-min scan"},
     {"id": "SAT-INSAT3DS", "name": "INSAT-3DS Advanced Sounder", "type": "satellite", "lat": 0.0, "lon": 82.0, "status": "online", "rangeKm": 2800, "description": "ISRO MOSDAC 82.0°E - 19-channel sounder"},
@@ -207,34 +270,72 @@ def _compute_attention_and_inflation(
     return weights, min(inflation, 3.2)
 
 
-def _build_synthetic_cells(
+def _build_cells(
     horizon_step: int, inflation: float
 ) -> List[Dict[str, Any]]:
-    """Generate synthetic convective cells for a given horizon step."""
+    """
+    Build convective cells driven by real-time Open-Meteo atmospheric fields
+    (or graceful benchmark atmospheric cube fallback if offline/timeout).
+    """
     time_evo = [1.0, 1.18, 1.28, 1.12][horizon_step]
     cells = []
-    for i, base in enumerate(_BASE_CELLS):
-        lat = base["lat"] + base["driftLat"] * (horizon_step + 0.2)
-        lon = base["lon"] + base["driftLon"] * (horizon_step + 0.2)
+    is_live = live_weather_service.is_live
 
-        prob = min(0.98, base["baseProb"] * (1.0 + horizon_step * 0.05))
-        flash = base["baseFlash"] * time_evo
-        if base["growth"] == "decaying":
-            prob = max(0.2, base["baseProb"] * (1.0 - horizon_step * 0.15))
-            flash = max(2.0, base["baseFlash"] * (1.0 - horizon_step * 0.22))
+    for i, base in enumerate(_BASE_CELLS):
+        # Sample localized atmospheric conditions near this storm cell
+        cond = live_weather_service.get_nearest_conditions(base["lat"], base["lon"])
+        is_marine = base.get("isMarine", False)
+
+        if is_live and cond.is_live:
+            risk = cond.compute_convective_risk(horizon_step=horizon_step)
+            prob = risk["occurrence_probability"]
+            flash = risk["flash_rate"]
+            severity = risk["severity"]
+            growth = risk["growth"]
+            speed_kmh = risk["motion_speed_kmh"]
+            advect_bearing = risk["advect_bearing"]
+
+            step_dist_km = speed_kmh * 0.25  # 15 min = 0.25 hours
+            bearing_rad = math.radians(advect_bearing)
+
+            d_lat = (step_dist_km * math.cos(bearing_rad)) / 111.0
+            d_lon = (step_dist_km * math.sin(bearing_rad)) / (
+                111.0 * max(0.2, math.cos(math.radians(base["lat"])))
+            )
+
+            # Projected location along live advection trajectory
+            lat = base["lat"] + d_lat * (horizon_step + 0.2)
+            lon = base["lon"] + d_lon * (horizon_step + 0.2)
+
+            cell_cape = int(round(cond.cape))
+            cell_cin = int(round(cond.cin))
+            cell_wind = cond.wind_speed_10m
+        else:
+            # Benchmark fallback logic
+            lat = base["lat"] + base["driftLat"] * (horizon_step + 0.2)
+            lon = base["lon"] + base["driftLon"] * (horizon_step + 0.2)
+            prob = min(0.98, base["baseProb"] * (1.0 + horizon_step * 0.05))
+            flash = base["baseFlash"] * time_evo
+            if base["growth"] == "decaying":
+                prob = max(0.12, base["baseProb"] * (1.0 - horizon_step * 0.15))
+                flash = max(0.15, base["baseFlash"] * (1.0 - horizon_step * 0.22))
+            growth = base["growth"]
+            cell_cape = int(base["cape"] + (120 if i % 2 == 0 else -90))
+            cell_cin = int(base["cin"] + (-4 if i % 2 == 0 else 6))
+            speed_kmh = 16.0 if "Malabar" in base["name"] else 24.0
+            advect_bearing = 68.0
+            cell_wind = 18.0
+
+            if prob >= 0.75:
+                severity = "extreme" if flash > 20.0 else "severe"
+            elif prob < 0.25:
+                severity = "low"
+            else:
+                severity = "moderate"
 
         alea = min(0.85, 0.15 + horizon_step * 0.08)
         epis = min(0.95, (0.12 + horizon_step * 0.06) * inflation)
         total_unc = min(0.98, math.sqrt(alea ** 2 + epis ** 2))
-
-        if flash > 25 or (prob > 0.85 and flash > 18):
-            severity = "extreme"
-        elif flash > 15 or prob > 0.70:
-            severity = "severe"
-        elif flash < 6 and prob < 0.40:
-            severity = "low"
-        else:
-            severity = "moderate"
 
         cells.append({
             "id": f"{base['id']}-h{horizon_step}",
@@ -247,18 +348,42 @@ def _build_synthetic_cells(
             "aleatoricUncertainty": round(alea, 3),
             "epistemicUncertainty": round(epis, 3),
             "totalUncertainty": round(total_unc, 3),
-            "cape": int(base["cape"] + (120 if i % 2 == 0 else -90)),
-            "cin": int(base["cin"] + (-4 if i % 2 == 0 else 6)),
-            "growthRate": base["growth"],
+            "cape": cell_cape,
+            "cin": cell_cin,
+            "growthRate": growth,
             "severity": severity,
+            "motionSpeedKmh": round(speed_kmh, 1),
+            "bearingDeg": round(advect_bearing, 1),
+            "windSpeed10m": round(cell_wind, 1),
         })
+
     return cells
+
+
+# Backwards compatibility alias
+_build_synthetic_cells = _build_cells
 
 
 def _build_alerts(cells: List[Dict[str, Any]], horizon_label: str) -> List[Dict[str, Any]]:
     alerts = []
     for i, cell in enumerate(cells):
         if cell["severity"] in ("severe", "extreme"):
+            affected_dwr = "DWR-PAT / DWR-KOL"
+            if "Chota" in cell["name"]:
+                affected_dwr = "DWR-PAT / DWR-KOL"
+            elif "Coromandel" in cell["name"]:
+                affected_dwr = "DWR-CHE (Chennai)"
+            elif "Malabar" in cell["name"]:
+                affected_dwr = "DWR-MUM / DWR-CHE"
+            elif "Brahmaputra" in cell["name"]:
+                affected_dwr = "DWR-MOH / DWR-KOL"
+            elif "Northern" in cell["name"]:
+                affected_dwr = "DWR-DEL (Palam)"
+            elif "Western Ghats" in cell["name"]:
+                affected_dwr = "DWR-MUM (Colaba)"
+            elif "Telangana" in cell["name"]:
+                affected_dwr = "DWR-HYD (Begumpet)"
+
             alerts.append({
                 "id": f"alert-{cell['id']}-{i}",
                 "region": cell["name"],
@@ -270,7 +395,7 @@ def _build_alerts(cells: List[Dict[str, Any]], horizon_label: str) -> List[Dict[
                 ),
                 "leadTime": horizon_label,
                 "peakFlashRate": cell["flashDensity"],
-                "affectedDwr": "DWR-PAT / DWR-KOL" if "Chota" in cell["name"] else "DWR-MOH / DWR-DEL",
+                "affectedDwr": affected_dwr,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
     return alerts
@@ -518,19 +643,55 @@ class NowcastInferenceService:
             log.warning(f"Model inference failed: {e}. Using rule-based weights.")
             model_attn = weights
 
-        cells = _build_synthetic_cells(horizon_step, inflation)
+        # Ensure live weather grid is active or cached (falls back gracefully)
+        try:
+            live_weather_service.fetch_live_grid(force_refresh=False)
+        except Exception as e:
+            log.warning(f"Live weather check failed; proceeding with fallback: {e}")
+
+        cells = _build_cells(horizon_step, inflation)
         alerts = _build_alerts(cells, horizon["label"])
 
-        # Thermodynamics (ERA5 static values for India pre-monsoon/monsoon)
-        thermo = {
-            "cape": 2950,
-            "cin": 24,
-            "moistureConvergence": 4.8,
-            "filmGateActivation": round(0.82 - horizon_step * 0.04, 2),
-            "liftedIndex": -6.4,
-            "shear06km": 21.5,
-            "convectiveRegime": "High-CAPE / Weak-CIN Tropical Maritime Convection",
-        }
+        # Thermodynamics: real aggregated fields when live NWP is active, else benchmark cube
+        is_live = live_weather_service.is_live
+        if is_live:
+            pts = live_weather_service.get_all_points()
+            mean_cape = sum(p["cape"] for p in pts) / len(pts)
+            mean_cin = sum(p["cin"] for p in pts) / len(pts)
+            max_cape = max(p["cape"] for p in pts)
+            total_rain = sum(p.get("rain", p.get("precipitation", 0.0)) for p in pts)
+
+            if max_cape > 2500:
+                regime = "High-CAPE / Weak-CIN Tropical Maritime Convection"
+            elif any(p["id"] in ("chennai", "kerala", "andaman") and p.get("rain", p.get("precipitation", 0.0)) > 0.4 for p in pts):
+                regime = "Coastal Northeast Monsoon & Tropical Maritime Convective Flow"
+            elif mean_cape > 1200:
+                regime = "Moderate Instability Deep Convective Regime"
+            else:
+                regime = "Dry Inland Boundary Layer / Weak Convective Potential"
+
+            thermo = {
+                "cape": round(mean_cape, 1),
+                "cin": round(mean_cin, 1),
+                "moistureConvergence": round(2.5 + min(total_rain, 5.0) * 0.7, 1),
+                "filmGateActivation": round(min(1.0, max(0.2, mean_cape / 2800.0) - horizon_step * 0.04), 2),
+                "liftedIndex": round(-1.5 - (mean_cape / 550.0), 1),
+                "shear06km": round(18.0 + min(total_rain, 6.0) * 1.2, 1),
+                "convectiveRegime": regime,
+            }
+            data_source = "live_nwp"
+        else:
+            # ERA5 static values for India pre-monsoon/monsoon benchmark cube
+            thermo = {
+                "cape": 2950,
+                "cin": 24,
+                "moistureConvergence": 4.8,
+                "filmGateActivation": round(0.82 - horizon_step * 0.04, 2),
+                "liftedIndex": -6.4,
+                "shear06km": 21.5,
+                "convectiveRegime": "High-CAPE / Weak-CIN Tropical Maritime Convection",
+            }
+            data_source = "benchmark_cube"
 
         return {
             "horizon": horizon,
@@ -541,6 +702,8 @@ class NowcastInferenceService:
             "thermodynamics": thermo,
             "uncertaintyInflationFactor": round(inflation, 2),
             "alerts": alerts,
+            "dataSource": data_source,
+            "isLiveNwp": is_live,
         }
 
     # ------------------------------------------------------------------

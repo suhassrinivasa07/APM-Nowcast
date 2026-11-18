@@ -97,9 +97,22 @@ body {
   filter: brightness(0.62) saturate(0.65) contrast(1.12) !important;
 }
 
-/* Top Leaflet Reference Labels Pane (z-index: 650) - Crisp white text above weather heatmap */
+/* Top Leaflet Reference Labels Pane (z-index: 520) - Crisp white text above weather heatmap */
 .leaflet-labelsPane-pane {
+  z-index: 520 !important;
   filter: contrast(1.35) brightness(1.15) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.95)) !important;
+}
+
+.leaflet-marker-pane {
+  z-index: 600 !important;
+}
+
+.leaflet-tooltip-pane {
+  z-index: 900 !important;
+}
+
+.leaflet-popup-pane {
+  z-index: 950 !important;
 }
 
 /* 3D Viewport Tilt Perspectives */
@@ -197,8 +210,8 @@ body {
 .glass-cell-pill {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6) !important;
-  background: rgba(9, 13, 22, 0.92) !important;
-  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  background-color: #090d16 !important;
+  border: 1px solid rgba(148, 163, 184, 0.35) !important;
   color: #f8fafc !important;
 }
 
@@ -209,10 +222,8 @@ body {
 
 /* Leaflet Popups & Tooltips Styling */
 .leaflet-popup-content-wrapper {
-  background: rgba(9, 13, 22, 0.96) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(148, 163, 184, 0.25) !important;
+  background-color: #090d16 !important;
+  border: 1px solid rgba(148, 163, 184, 0.35) !important;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85) !important;
   color: #f8fafc !important;
   border-radius: 8px !important;
@@ -220,15 +231,13 @@ body {
 }
 
 .leaflet-popup-tip {
-  background: rgba(9, 13, 22, 0.96) !important;
-  border: 1px solid rgba(148, 163, 184, 0.25) !important;
+  background-color: #090d16 !important;
+  border: 1px solid rgba(148, 163, 184, 0.35) !important;
 }
 
 .leaflet-tooltip {
-  background: rgba(9, 13, 22, 0.96) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(148, 163, 184, 0.25) !important;
+  background-color: #090d16 !important;
+  border: 1px solid rgba(148, 163, 184, 0.35) !important;
   color: #f8fafc !important;
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85) !important;
   border-radius: 8px !important;
