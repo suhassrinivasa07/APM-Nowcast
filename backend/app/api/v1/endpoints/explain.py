@@ -58,10 +58,7 @@ _MODALITY_DESCRIPTIONS = {
 )
 async def explain_modalities(req: ExplainModalitiesRequest) -> ExplainModalitiesResponse:
     if not inference_service.is_ready:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Inference service not initialised.",
-        )
+        inference_service.initialize()
     try:
         active_sensors = {
             "satellite": req.satellite,
@@ -106,10 +103,7 @@ async def explain_modalities(req: ExplainModalitiesRequest) -> ExplainModalities
 )
 async def scenarios_dropout(req: DropoutScenarioRequest) -> DropoutScenarioResponse:
     if not inference_service.is_ready:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Inference service not initialised.",
-        )
+        inference_service.initialize()
     try:
         sensor_flags = {
             "satellite": req.satellite,

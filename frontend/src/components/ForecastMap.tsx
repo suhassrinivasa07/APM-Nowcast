@@ -80,14 +80,13 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
       zoomControl: false,
     });
 
-    // Dark theme CartoDB basemap tiles
+    // API-key-free dark basemap tile layer (Esri Dark Gray Canvas)
     L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
       {
         attribution:
-          '&copy; <a href="https://carto.com/">CARTO</a> | India Meteorological Domain (6.0°N–38.0°N, 68.0°E–98.0°E)',
-        subdomains: 'abcd',
-        maxZoom: 19,
+          'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ | India Meteorological Domain (6.0°N–38.0°N, 68.0°E–98.0°E)',
+        maxZoom: 16,
       }
     ).addTo(map);
 

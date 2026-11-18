@@ -138,7 +138,7 @@ class TestAPMNowcastEndToEndPipeline:
     Raw Data Ingestion -> Preprocessing -> DataCube -> Model Training -> Evaluation -> REST API.
     """
 
-    def test_full_e2e_pipeline_smoke(self, tmp_path: Path):
+    def test_full_e2e_pipeline_smoke(self, tmp_path: Path, client: TestClient):
         # -------------------------------------------------------------------
         # Phase 1: Raw Synthetic Multi-modal Files Generation
         # -------------------------------------------------------------------
@@ -269,36 +269,42 @@ class TestAPMNowcastEndToEndPipeline:
         # -------------------------------------------------------------------
         # Phase 6: Module 10 FastAPI TestClient Endpoints
         # -------------------------------------------------------------------
-        with TestClient(app) as client:
-            # Health endpoint
-            health_resp = client.get("/api/v1/health")
-            assert health_resp.status_code == 200
-            assert health_resp.json()["status"] == "healthy"
+        # Health endpoint
+        health_resp = client.get("/api/v1/health")
+        assert health_resp.status_code == 200
+        assert health_resp.json()["status"] == "healthy"
 
-            # Latest Forecast Snapshot (horizon 0, all sensors on)
-            latest_resp = client.get("/api/v1/forecast/latest")
-            assert latest_resp.status_code == 200
-            latest_data = latest_resp.json()
-            assert "horizon" in latest_data
-            assert "cells" in latest_data
-            assert "attentionWeights" in latest_data
-            assert "thermodynamics" in latest_data
-            assert latest_data["horizon"]["step"] == 0
+        # Latest Forecast Snapshot (horizon 0, all sensors on)
+        latest_resp = client.get("/api/v1/forecast/latest")
+        assert latest_resp.status_code == 200
+        latest_data = latest_resp.json()
+        assert "horizon" in latest_data
+        assert "cells" in latest_data
+        assert "attentionWeights" in latest_data
+        assert "thermodynamics" in latest_data
+        assert latest_data["horizon"]["step"] == 0
 
-            # Scenario Dropout POST Endpoint (radar=False)
-            dropout_req = {
-                "horizon": 0,
-                "satellite": True,
-                "radar": False,
-                "lightning": True,
-                "nwp": True,
-            }
-            scenario_resp = client.post("/api/v1/scenarios/dropout", json=dropout_req)
-            assert scenario_resp.status_code == 200
-            scenario_data = scenario_resp.json()
-            assert "attention_weights" in scenario_data
-            assert scenario_data["attention_weights"]["radar"] == 0.0
+        # Nowcast Snapshot endpoint
+        nowcast_resp = client.get("/api/v1/nowcast/snapshot", params={"horizon": 0})
+        assert nowcast_resp.status_code == 200
+        nowcast_data = nowcast_resp.json()
+        assert "horizon" in nowcast_data
+        assert "cells" in nowcast_data
 
-            aw = scenario_data["attention_weights"]
-            total_weight = aw["satellite"] + aw["radar"] + aw["lightning"] + aw["nwp"]
-            assert abs(total_weight - 1.0) < 1e-3, f"Attention weights sum={total_weight} != 1.0"
+        # Scenario Dropout POST Endpoint (radar=False)
+        dropout_req = {
+            "horizon": 0,
+            "satellite": True,
+            "radar": False,
+            "lightning": True,
+            "nwp": True,
+        }
+        scenario_resp = client.post("/api/v1/scenarios/dropout", json=dropout_req)
+        assert scenario_resp.status_code == 200
+        scenario_data = scenario_resp.json()
+        assert "attention_weights" in scenario_data
+        assert scenario_data["attention_weights"]["radar"] == 0.0
+
+        aw = scenario_data["attention_weights"]
+        total_weight = aw["satellite"] + aw["radar"] + aw["lightning"] + aw["nwp"]
+        assert abs(total_weight - 1.0) < 1e-3, f"Attention weights sum={total_weight} != 1.0"

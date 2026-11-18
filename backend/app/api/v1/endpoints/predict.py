@@ -42,10 +42,7 @@ router = APIRouter()
 )
 async def predict(req: PredictRequest) -> PredictResponse:
     if not inference_service.is_ready:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Inference service not initialised. Call startup first.",
-        )
+        inference_service.initialize()
     try:
         active_sensors = {
             "satellite": req.satellite,
@@ -98,10 +95,7 @@ async def predict(req: PredictRequest) -> PredictResponse:
 )
 async def forecast_latest() -> NowcastSnapshot:
     if not inference_service.is_ready:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Inference service not initialised.",
-        )
+        inference_service.initialize()
     try:
         snapshot = inference_service.build_snapshot(
             horizon_step=0,
