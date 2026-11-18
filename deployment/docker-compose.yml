@@ -5,26 +5,50 @@ services:
     build:
       context: ..
       dockerfile: deployment/Dockerfile.backend
+    container_name: apm_nowcast_backend
     ports:
       - "8000:8000"
     environment:
-      - APP_NAME=APM-Nowcast API
+      - APP_NAME=APM-Nowcast Inference Engine
       - APP_ENV=production
       - DEBUG=False
       - API_HOST=0.0.0.0
       - API_PORT=8000
-      - ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000,http://localhost:80
-      - DEVICE=cpu
+      - ALLOWED_ORIGINS=http://localhost,http://localhost:80,http://localhost:3000,http://localhost:5173
+      - DEVICE=cuda
+      - CHECKPOINT_DIR=/app/checkpoints
     volumes:
       - ../data:/app/data
+      - ../checkpoints:/app/checkpoints
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   frontend:
     build:
       context: ..
       dockerfile: deployment/Dockerfile.frontend
+    container_name: apm_nowcast_frontend
     ports:
+      - "80:80"
       - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

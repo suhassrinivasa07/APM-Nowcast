@@ -6,6 +6,8 @@
 
 import {
   BenchmarkModelMetrics,
+  CellMotionVector,
+  CellTrajectoryPoint,
   ConvectiveStormCell,
   HorizonInfo,
   HorizonStep,
@@ -14,10 +16,52 @@ import {
   NowcastSnapshot,
   SensorStation,
   SevereAlert,
+  SubRegionPreset,
   ThermodynamicState,
 } from '../types/nowcast';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+
+/**
+ * Pan-India and Regional Sub-Domain Camera Presets
+ */
+export const SUB_REGION_PRESETS: SubRegionPreset[] = [
+  {
+    id: 'all_india',
+    name: 'All India',
+    center: [22.5, 79.0],
+    zoom: 5,
+    description: 'Pan-India Domain (6.0°N–38.0°N, 68.0°E–98.0°E) [Default]',
+  },
+  {
+    id: 'indo_gangetic',
+    name: 'Indo-Gangetic Plain',
+    center: [26.5, 82.5],
+    zoom: 6,
+    description: 'Northern Plains Severe Convective Belt (NCR to Bihar)',
+  },
+  {
+    id: 'western_ghats',
+    name: 'Western Ghats & Deccan',
+    center: [15.5, 75.5],
+    zoom: 6,
+    description: 'Orographically Forced Coastal & Deccan Thunderstorms',
+  },
+  {
+    id: 'northeast_bob',
+    name: 'Northeast & Bay of Bengal Coast',
+    center: [24.5, 91.5],
+    zoom: 6,
+    description: 'Norwester Corridors & Meghalaya/Assam High Flash Zone',
+  },
+  {
+    id: 'central_india',
+    name: 'Central India',
+    center: [22.0, 78.5],
+    zoom: 6,
+    description: 'Madhya Pradesh & Vidarbha Convective Belt',
+  },
+];
 
 // Base DWR radar and observation stations across India
 export const INDIAN_SENSOR_STATIONS: SensorStation[] = [
@@ -468,10 +512,70 @@ export const BENCHMARK_VERIFICATION_DATA: BenchmarkModelMetrics[] = [
   },
 ];
 
-export class NowcastApiService {
-  private isSimulationMode: boolean = true;
+/**
+ * Predicts and extrapolates convective storm cell motion trajectories across
+ * lead time steps +15m -> +30m -> +45m -> +60m.
+ */
+export function computeCellTrajectories(cells: ConvectiveStormCell[]): CellMotionVector[] {
+  return cells.map((cell) => {
+    // Find matching base template if any to obtain characteristic drift vector
+    const base = BASE_CONVECTIVE_CELLS.find(
+      (b) => cell.id.startsWith(b.id) || cell.name.toLowerCase().includes(b.name.split(' ')[0].toLowerCase())
+    );
+    const driftLat = base ? base.driftLatPerStep : 0.09;
+    const driftLon = base ? base.driftLonPerStep : 0.19;
 
-  constructor(simulationMode: boolean = true) {
+    // Calculate trajectory points across all 4 lead-time steps (T+15, T+30, T+45, T+60)
+    const points: CellTrajectoryPoint[] = ([0, 1, 2, 3] as HorizonStep[]).map((step) => {
+      // Cell's projected coordinates at this horizon step
+      const lat = base
+        ? base.initLat + base.driftLatPerStep * (step + 0.2)
+        : cell.lat + driftLat * (step - 0.5);
+      const lon = base
+        ? base.initLon + base.driftLonPerStep * (step + 0.2)
+        : cell.lon + driftLon * (step - 0.5);
+      return {
+        step,
+        label: HORIZON_DEFINITIONS[step].label,
+        lat: parseFloat(lat.toFixed(4)),
+        lon: parseFloat(lon.toFixed(4)),
+      };
+    });
+
+    const dLatKm = driftLat * 111.0;
+    const dLonKm = driftLon * 111.0 * Math.cos((cell.lat * Math.PI) / 180.0);
+    const stepDistKm = Math.sqrt(dLatKm * dLatKm + dLonKm * dLonKm);
+    const speedKmH = Math.round(stepDistKm * 4.0); // 4 steps = 1 hour
+
+    // Meteorological bearing (direction towards which storm moves)
+    let bearing = Math.round((Math.atan2(dLonKm, dLatKm) * 180.0) / Math.PI);
+    if (bearing < 0) bearing += 360;
+
+    let dirLabel = 'ENE';
+    if (bearing >= 337.5 || bearing < 22.5) dirLabel = 'N';
+    else if (bearing < 67.5) dirLabel = 'NE';
+    else if (bearing < 112.5) dirLabel = 'ENE';
+    else if (bearing < 157.5) dirLabel = 'ESE';
+    else if (bearing < 202.5) dirLabel = 'S';
+    else if (bearing < 247.5) dirLabel = 'WSW';
+    else if (bearing < 292.5) dirLabel = 'W';
+    else dirLabel = 'NW';
+
+    return {
+      cellId: cell.id,
+      cellName: cell.name,
+      points,
+      speedKmH,
+      bearingDeg: bearing,
+      directionLabel: dirLabel,
+    };
+  });
+}
+
+export class NowcastApiService {
+  private isSimulationMode: boolean = false; // Default: Live FastAPI Backend Mode
+
+  constructor(simulationMode: boolean = false) {
     this.isSimulationMode = simulationMode;
   }
 
@@ -484,42 +588,47 @@ export class NowcastApiService {
   }
 
   /**
+   * Generates synthetic demonstration snapshot (pure simulation).
+   */
+  public getSyntheticSnapshot(
+    horizonStep: HorizonStep,
+    activeSensors: Record<ModalityId, boolean>
+  ): NowcastSnapshot {
+    return generateSyntheticSnapshot(horizonStep, activeSensors);
+  }
+
+  /**
    * Fetches the nowcast snapshot for a specified lead-time horizon and sensor configuration.
+   * In Live Mode, issues a real HTTP request to FastAPI and throws if backend is unreachable.
    */
   public async getNowcastSnapshot(
     horizonStep: HorizonStep,
     activeSensors: Record<ModalityId, boolean>
   ): Promise<NowcastSnapshot> {
     if (this.isSimulationMode) {
-      // Simulate network micro-delay for realistic UI feedback
+      // Simulate realistic micro-delay for UI feedback
       await new Promise((resolve) => setTimeout(resolve, 80));
       return generateSyntheticSnapshot(horizonStep, activeSensors);
     }
 
-    try {
-      const sensorQuery = Object.entries(activeSensors)
-        .map(([k, v]) => `${k}=${v}`)
-        .join('&');
-      const response = await fetch(
-        `${API_BASE_URL}/nowcast/snapshot?horizon=${horizonStep}&${sensorQuery}`,
-        {
-          headers: { Accept: 'application/json' },
-        }
-      );
+    const sensorQuery = Object.entries(activeSensors)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('&');
+    const url = `${API_BASE_URL}/nowcast/snapshot?horizon=${horizonStep}&${sensorQuery}`;
 
-      if (!response.ok) {
-        throw new Error(`Nowcast API error: ${response.status} ${response.statusText}`);
-      }
+    const response = await fetch(url, {
+      headers: { Accept: 'application/json' },
+    });
 
-      return await response.json();
-    } catch (err) {
-      console.warn('Nowcast live API unreachable. Falling back to offline simulation mode.', err);
-      return generateSyntheticSnapshot(horizonStep, activeSensors);
+    if (!response.ok) {
+      throw new Error(`Nowcast API error: ${response.status} ${response.statusText}`);
     }
+
+    return await response.json();
   }
 
   /**
-   * Fetches multi-model meteorological verification benchmarks
+   * Fetches multi-model meteorological verification benchmarks.
    */
   public async getBenchmarkMetrics(): Promise<BenchmarkModelMetrics[]> {
     if (this.isSimulationMode) {
@@ -532,19 +641,18 @@ export class NowcastApiService {
       });
       if (!response.ok) throw new Error('Failed to fetch benchmarks');
       return await response.json();
-    } catch (err) {
-      console.warn('Verification API unreachable. Returning standard benchmarks.', err);
+    } catch {
       return BENCHMARK_VERIFICATION_DATA;
     }
   }
 
   /**
-   * Checks backend health
+   * Checks backend health endpoint.
    */
   public async checkBackendHealth(): Promise<{ online: boolean; info?: any }> {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
       const res = await fetch(`${API_BASE_URL.replace('/api/v1', '')}/health`, {
         signal: controller.signal,
       });
@@ -560,4 +668,4 @@ export class NowcastApiService {
   }
 }
 
-export const nowcastApi = new NowcastApiService(true);
+export const nowcastApi = new NowcastApiService(false); // Default to Live Mode

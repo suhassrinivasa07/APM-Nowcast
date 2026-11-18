@@ -105,7 +105,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <Globe2 size={14} color="#34d399" />
-          <span>Domain: <strong>India (8°N–37°N, 68°E–98°E)</strong></span>
+          <span>Domain: <strong>Pan-India (6.0°N–38.0°N, 68.0°E–98.0°E)</strong></span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -118,7 +118,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
         {/* Backend Online status */}
         <div
-          title={isBackendOnline ? 'FastAPI Backend Online' : 'FastAPI Offline - Using Simulation'}
+          title={isBackendOnline ? 'FastAPI Backend Online' : 'FastAPI Offline - Using Standalone/Simulation'}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -132,19 +132,19 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <Server size={13} color={isBackendOnline ? '#34d399' : '#eab308'} />
           <span style={{ color: isBackendOnline ? '#34d399' : '#cbd5e1' }}>
-            {isBackendOnline ? 'API Connected' : 'Local Standalone'}
+            {isBackendOnline ? 'API Connected (Port 8000)' : 'API Offline'}
           </span>
         </div>
 
-        {/* Demo Mode Toggle Button */}
+        {/* Live vs Simulation Mode Toggle Button */}
         <button
           onClick={onToggleSimulationMode}
-          title="Toggle between Live API and Offline Simulation Mode"
+          title="Toggle between Live FastAPI Backend and Offline Simulation Mode"
           style={{
             background: isSimulationMode ? '#1e293b' : '#0284c7',
-            border: isSimulationMode ? '1px solid #38bdf8' : '1px solid #60a5fa',
+            border: isSimulationMode ? '1px solid #facc15' : '1px solid #38bdf8',
             borderRadius: '6px',
-            padding: '5px 10px',
+            padding: '5px 12px',
             color: '#ffffff',
             cursor: 'pointer',
             display: 'flex',
@@ -157,13 +157,13 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           {isSimulationMode ? (
             <>
-              <ToggleRight size={16} color="#38bdf8" />
-              <span>Mode: <strong>Demo / Simulation</strong></span>
+              <ToggleRight size={16} color="#facc15" />
+              <span>Mode: <strong style={{ color: '#facc15' }}>Simulation Mode (Synthetic Data)</strong></span>
             </>
           ) : (
             <>
-              <ToggleLeft size={16} color="#ffffff" />
-              <span>Mode: <strong>Live FastAPI</strong></span>
+              <ToggleLeft size={16} color="#38bdf8" />
+              <span>Mode: <strong style={{ color: '#38bdf8' }}>Live FastAPI Backend</strong></span>
             </>
           )}
         </button>

@@ -97,3 +97,28 @@ export interface NowcastSnapshot {
   uncertaintyInflationFactor: number; // 1.0x (all online) to 3.2x (blackout)
   alerts: SevereAlert[];
 }
+
+export interface SubRegionPreset {
+  id: string;
+  name: string;
+  center: [number, number];
+  zoom: number;
+  description: string;
+}
+
+export interface CellTrajectoryPoint {
+  step: HorizonStep;
+  label: string;
+  lat: number;
+  lon: number;
+}
+
+export interface CellMotionVector {
+  cellId: string;
+  cellName: string;
+  points: CellTrajectoryPoint[];
+  speedKmH: number;
+  bearingDeg: number;
+  directionLabel: string;
+}
+

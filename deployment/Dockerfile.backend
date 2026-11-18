@@ -1,24 +1,87 @@
-# APM-Nowcast Backend Dockerfile
-FROM python:3.11-slim
+# =============================================================================
+# APM-Nowcast Backend Dockerfile — Multi-stage CUDA / Python 3.11+ Container
+# Targets Pan-India Atmospheric Nowcasting with RTX 3050 / Graceful CPU fallback
+# =============================================================================
+
+# --- Stage 1: Build & Dependencies ---
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Install system compilation dependencies & geospatial libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    libnetcdf-dev \
+    libhdf5-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PyTorch with CUDA 12.1 or CPU wheels
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu121 || \
+    pip install --no-cache-dir torch torchvision
+
+# Install core scientific and backend Python dependencies
+RUN pip install --no-cache-dir \
+    fastapi>=0.110.0 \
+    uvicorn[standard]>=0.28.0 \
+    pydantic>=2.6.0 \
+    pydantic-settings>=2.2.0 \
+    python-dotenv>=1.0.1 \
+    numpy>=1.26.0 \
+    pandas>=2.2.0 \
+    scipy \
+    xarray>=2024.2.0 \
+    netCDF4 \
+    h5py \
+    zarr \
+    numcodecs \
+    matplotlib
+
+# --- Stage 2: Runtime Production Container ---
+FROM python:3.11-slim AS runner
 
 WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    APP_ENV=production \
+    DEVICE=cuda \
+    PYTHONPATH="/app:/app/backend:/app/common:/app/data_ingestion:/app/preprocessing:/app/datacube:/app/models:/app/losses:/app/training:/app/experiments"
 
-# Install system dependencies
+# Install runtime shared libraries and curl for HEALTHCHECK
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     curl \
+    libnetcdf19 \
+    libhdf5-103-1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY backend/requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy installed Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Copy application source
-COPY backend /app/
+# Copy APM-Nowcast application packages
+COPY common/ /app/common/
+COPY data_ingestion/ /app/data_ingestion/
+COPY preprocessing/ /app/preprocessing/
+COPY datacube/ /app/datacube/
+COPY models/ /app/models/
+COPY losses/ /app/losses/
+COPY training/ /app/training/
+COPY experiments/ /app/experiments/
+COPY backend/ /app/backend/
+
+# Create data and checkpoint directories
+RUN mkdir -p /app/data /app/checkpoints
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Health check against /api/v1/health
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/api/v1/health || exit 1
+
+WORKDIR /app/backend
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

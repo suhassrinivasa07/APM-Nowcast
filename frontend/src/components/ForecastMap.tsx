@@ -18,6 +18,10 @@ import {
   SensorStation,
 } from '../types/nowcast';
 import {
+  SUB_REGION_PRESETS,
+  computeCellTrajectories,
+} from '../api/nowcastApi';
+import {
   Layers,
   Radio,
   Zap,
@@ -25,6 +29,8 @@ import {
   Compass,
   Activity,
   AlertTriangle,
+  TrendingUp,
+  MapPin,
 } from 'lucide-react';
 
 interface ForecastMapProps {
@@ -53,16 +59,19 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
   const cellLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const stationLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const rangeRingsGroupRef = useRef<L.LayerGroup | null>(null);
+  const trajectoryLayerGroupRef = useRef<L.LayerGroup | null>(null);
 
   const [showStations, setShowStations] = useState<boolean>(true);
   const [showRangeRings, setShowRangeRings] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
+  const [showTrajectories, setShowTrajectories] = useState<boolean>(true);
+  const [activeRegionPreset, setActiveRegionPreset] = useState<string>('all_india');
 
   // Initialize Leaflet map
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
-    // Center over India (22.5°N, 79.0°E) with zoom level 5
+    // Center over India (22.5°N, 79.0°E) with zoom level 5 (Pan-India Domain: 6.0°N–38.0°N, 68.0°E–98.0°E)
     const map = L.map(mapContainerRef.current, {
       center: [22.5, 79.0],
       zoom: 5,
@@ -76,7 +85,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
       'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
       {
         attribution:
-          '&copy; <a href="https://carto.com/">CARTO</a> | India Met Domain',
+          '&copy; <a href="https://carto.com/">CARTO</a> | India Meteorological Domain (6.0°N–38.0°N, 68.0°E–98.0°E)',
         subdomains: 'abcd',
         maxZoom: 19,
       }
@@ -87,6 +96,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
     // Create layer groups
     rangeRingsGroupRef.current = L.layerGroup().addTo(map);
+    trajectoryLayerGroupRef.current = L.layerGroup().addTo(map);
     cellLayerGroupRef.current = L.layerGroup().addTo(map);
     stationLayerGroupRef.current = L.layerGroup().addTo(map);
 
@@ -317,10 +327,98 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
     });
   }, [stations, showStations, showRangeRings]);
 
-  const resetView = () => {
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.setView([22.5, 79.0], 5, { animate: true });
+  // Update Storm Trajectory Motion Vectors Overlay (+15m -> +30m -> +45m -> +60m)
+  useEffect(() => {
+    const trajGroup = trajectoryLayerGroupRef.current;
+    if (!trajGroup || !mapInstanceRef.current) return;
+
+    trajGroup.clearLayers();
+    if (!showTrajectories || cells.length === 0) return;
+
+    const vectors = computeCellTrajectories(cells);
+
+    vectors.forEach((vec) => {
+      const latlngs: L.LatLngExpression[] = vec.points.map((p) => [p.lat, p.lon]);
+
+      // Predicted motion vector polyline
+      const polyline = L.polyline(latlngs, {
+        color: '#facc15',
+        weight: 2.5,
+        opacity: 0.85,
+        dashArray: '5, 6',
+      });
+
+      // Tooltip along track with displacement speed and bearing
+      polyline.bindTooltip(
+        `<div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 5px 8px; background: #0f172a; color: #f8fafc; border: 1px solid #eab308; border-radius: 6px;">
+          <div style="font-weight: 700; color: #facc15;">⚡ ${vec.cellName} Trajectory</div>
+          <div>Velocity: <strong>${vec.speedKmH} km/h</strong> towards <strong>${vec.directionLabel} (${vec.bearingDeg}°)</strong></div>
+          <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">Track: +15m → +30m → +45m → +60m</div>
+        </div>`,
+        { sticky: true, opacity: 0.95 }
+      );
+
+      polyline.addTo(trajGroup);
+
+      // Trajectory waypoints (+15m, +30m, +45m, +60m)
+      vec.points.forEach((pt, ptIdx) => {
+        const isCurrent = pt.step === horizon.step;
+        const radius = isCurrent ? 5.5 : 3.5;
+        const fillColor = isCurrent ? '#f43f5e' : ptIdx === 3 ? '#ec4899' : '#facc15';
+
+        const dot = L.circleMarker([pt.lat, pt.lon], {
+          radius: radius,
+          color: '#ffffff',
+          weight: 1.5,
+          fillColor: fillColor,
+          fillOpacity: 0.95,
+        });
+
+        dot.bindTooltip(
+          `<div style="font-size: 10px; font-weight: 600; padding: 2px 4px; background: #0f172a; color: #f8fafc; border: 1px solid #334155;">
+            ${vec.cellName.split(' ')[0]} @ ${pt.label}
+          </div>`,
+          { direction: 'top', offset: [0, -4] }
+        );
+
+        dot.addTo(trajGroup);
+      });
+
+      // Vector head arrow marker at final point (+60m)
+      const lastPoint = vec.points[vec.points.length - 1];
+      const arrowIcon = L.divIcon({
+        className: 'motion-vector-arrow',
+        html: `<div style="
+          transform: rotate(${vec.bearingDeg - 90}deg);
+          color: #facc15;
+          font-size: 15px;
+          line-height: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          text-shadow: 0 0 6px #000;
+          pointer-events: none;
+        ">
+          ➤
+        </div>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      });
+
+      L.marker([lastPoint.lat, lastPoint.lon], { icon: arrowIcon, interactive: false }).addTo(trajGroup);
+    });
+  }, [cells, showTrajectories, horizon]);
+
+  const handleSelectRegion = (presetId: string) => {
+    setActiveRegionPreset(presetId);
+    const preset = SUB_REGION_PRESETS.find((p) => p.id === presetId);
+    if (preset && mapInstanceRef.current) {
+      mapInstanceRef.current.setView(preset.center, preset.zoom, { animate: true });
     }
+  };
+
+  const resetView = () => {
+    handleSelectRegion('all_india');
   };
 
   return (
@@ -409,6 +507,50 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
         </button>
       </div>
 
+      {/* Sub-Region Camera Zoom Presets */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '58px',
+          left: '14px',
+          zIndex: 1000,
+          background: 'rgba(15, 23, 42, 0.90)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(51, 65, 85, 0.9)',
+          borderRadius: '8px',
+          padding: '4px 8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
+          fontSize: '11px',
+        }}
+      >
+        <span style={{ color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+          <MapPin size={12} color="#38bdf8" /> Sub-Region:
+        </span>
+        <select
+          value={activeRegionPreset}
+          onChange={(e) => handleSelectRegion(e.target.value)}
+          style={{
+            background: '#1e293b',
+            border: '1px solid #334155',
+            color: '#f8fafc',
+            borderRadius: '4px',
+            padding: '3px 8px',
+            fontSize: '11px',
+            cursor: 'pointer',
+            outline: 'none',
+          }}
+        >
+          {SUB_REGION_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} {p.id === 'all_india' ? '[Default]' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* Top Right: Layer Visibility & View Reset Controls */}
       <div
         style={{
@@ -429,6 +571,16 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
           boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
         }}
       >
+        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={showTrajectories}
+            onChange={(e) => setShowTrajectories(e.target.checked)}
+            style={{ accentColor: '#facc15' }}
+          />
+          <TrendingUp size={13} color="#facc15" /> Motion Vectors
+        </label>
+
         <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
           <input
             type="checkbox"
@@ -461,7 +613,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
         <button
           onClick={resetView}
-          title="Reset to India Overview (22.5°N, 79.0°E)"
+          title="Reset to Pan-India Overview (22.5°N, 79.0°E, Zoom 5)"
           style={{
             background: '#1e293b',
             border: '1px solid #475569',
@@ -544,6 +696,13 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
                 <span>Sensors missing: Epistemic variance inflated {uncertaintyInflation}x</span>
               </div>
             )}
+          </div>
+        )}
+
+        {showTrajectories && (
+          <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #334155', color: '#facc15', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <TrendingUp size={12} color="#facc15" />
+            <span>Predicted Motion Vectors (+15m → +60m Extrapolated)</span>
           </div>
         )}
       </div>
