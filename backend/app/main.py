@@ -83,9 +83,10 @@ async def root_health() -> HealthResponse:
 
 
 # ---------------------------------------------------------------------------
-# Mount versioned API
+# Mount versioned API & root-level alias
 # ---------------------------------------------------------------------------
 app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router, prefix="")
 
 
 # ---------------------------------------------------------------------------

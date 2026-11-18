@@ -20,7 +20,8 @@ import {
   ThermodynamicState,
 } from '../types/nowcast';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+export const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+export const API_BASE_URL = API_BASE;
 
 /**
  * Pan-India and Regional Sub-Domain Camera Presets
@@ -653,7 +654,10 @@ export class NowcastApiService {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2500);
-      const res = await fetch(`${API_BASE_URL.replace('/api/v1', '')}/health`, {
+      const healthUrl = API_BASE_URL.includes('/api/v1')
+        ? API_BASE_URL.replace(/\/api\/v1\/?$/, '') + '/health'
+        : `${API_BASE_URL}/health`;
+      const res = await fetch(healthUrl || '/health', {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);

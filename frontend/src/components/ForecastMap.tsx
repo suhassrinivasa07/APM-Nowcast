@@ -1,14 +1,15 @@
 /**
- * Geospatial Convective Forecast Map
- * Interactive Leaflet map centered over India (22.5°N, 79.0°E)
- * Renders spatial heatmaps/overlays for:
- *   - Predicted Lightning Occurrence Probability (0-100%)
- *   - Expected Flash Density (flashes / km² / 15min)
- *   - Total Predictive Uncertainty (Aleatoric + Epistemic)
- *   - IMD Doppler Weather Radar (DWR) 250km ranges and station markers
+ * Geospatial Convective Forecast Map — Windy.com-Inspired 3D Satellite Edition
+ *
+ * Key Architecture:
+ *   - Map initialized ONCE on mount (useEffect([], ...)); user zoom & pan strictly preserved across horizon ticks
+ *   - Continuous 60fps requestAnimationFrame loop for 1,400 divergence-free wind streamline wisps (z-index: 450)
+ *   - Continuous matte domain-warped organic scalar field heatmap in deep teal -> slate indigo -> purple -> rose-magenta (z-index: 430)
+ *   - Darkened & desaturated satellite relief basemap (brightness 0.62, contrast 1.12, saturate 0.65)
+ *   - Smooth in-place updates for storm cells, trajectories, and popups during Play mode
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
@@ -31,6 +32,9 @@ import {
   AlertTriangle,
   TrendingUp,
   MapPin,
+  Sparkles,
+  Wind,
+  Box,
 } from 'lucide-react';
 
 interface ForecastMapProps {
@@ -44,6 +48,20 @@ interface ForecastMapProps {
   uncertaintyInflation: number;
 }
 
+interface WindParticle {
+  lat: number;
+  lon: number;
+  prevLat?: number;
+  prevLon?: number;
+  age: number;
+  maxAge: number;
+  speedMultiplier: number;
+}
+
+const NUM_WIND_PARTICLES = 1400;
+const GRID_W = 160;
+const GRID_H = 120;
+
 export const ForecastMap: React.FC<ForecastMapProps> = ({
   cells,
   stations,
@@ -55,19 +73,509 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
   uncertaintyInflation,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
+  const heatmapCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const windCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
+
+  // Offscreen canvas and pixel buffer for smooth bilinear matte scalar field
+  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const offscreenCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const imageDataRef = useRef<ImageData | null>(null);
+
   const cellLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const stationLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const rangeRingsGroupRef = useRef<L.LayerGroup | null>(null);
   const trajectoryLayerGroupRef = useRef<L.LayerGroup | null>(null);
 
+  // State refs to decouple active 60fps render loops from map re-initialization
+  const cellsRef = useRef<ConvectiveStormCell[]>(cells);
+  cellsRef.current = cells;
+
+  const overlayModeRef = useRef<OverlayMode>(overlayMode);
+  overlayModeRef.current = overlayMode;
+
+  const [is3DMode, setIs3DMode] = useState<boolean>(false);
+  const [showWindParticles, setShowWindParticles] = useState<boolean>(true);
+  const [showPlumes, setShowPlumes] = useState<boolean>(true);
+  const [showTrajectories, setShowTrajectories] = useState<boolean>(true);
   const [showStations, setShowStations] = useState<boolean>(true);
   const [showRangeRings, setShowRangeRings] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
-  const [showTrajectories, setShowTrajectories] = useState<boolean>(true);
   const [activeRegionPreset, setActiveRegionPreset] = useState<string>('all_india');
+  const [mapReady, setMapReady] = useState<boolean>(false);
 
-  // Initialize Leaflet map
+  const showPlumesRef = useRef<boolean>(showPlumes);
+  showPlumesRef.current = showPlumes;
+
+  const particlesRef = useRef<WindParticle[]>([]);
+  const animationFrameIdRef = useRef<number | null>(null);
+
+  // =========================================================================
+  // Initialize 1,400 Wind Particles Array across Pan-India Domain
+  // =========================================================================
+  useEffect(() => {
+    const particles: WindParticle[] = [];
+    for (let i = 0; i < NUM_WIND_PARTICLES; i++) {
+      const lat = 6.0 + Math.random() * 32.0; // 6.0°N to 38.0°N
+      const lon = 68.0 + Math.random() * 30.0; // 68.0°E to 98.0°E
+      particles.push({
+        lat,
+        lon,
+        prevLat: lat,
+        prevLon: lon,
+        age: Math.floor(Math.random() * 100),
+        maxAge: 60 + Math.floor(Math.random() * 60),
+        speedMultiplier: 0.85 + Math.random() * 0.35,
+      });
+    }
+    particlesRef.current = particles;
+  }, []);
+
+  // Initialize offscreen grid canvas once
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      const oc = document.createElement('canvas');
+      oc.width = GRID_W;
+      oc.height = GRID_H;
+      offscreenCanvasRef.current = oc;
+      const octx = oc.getContext('2d');
+      offscreenCtxRef.current = octx;
+      if (octx) {
+        imageDataRef.current = octx.createImageData(GRID_W, GRID_H);
+      }
+    }
+  }, []);
+
+  // =========================================================================
+  // Synchronize Canvas Layer Offset & Dimensions with Leaflet (High-DPI)
+  // containerPointToLayerPoint([0, 0]) keeps canvases locked to viewport
+  // =========================================================================
+  const syncCanvasSizeAndPosition = useCallback(() => {
+    const map = mapInstanceRef.current;
+    const hCanvas = heatmapCanvasRef.current;
+    const wCanvas = windCanvasRef.current;
+    if (!map) return;
+
+    const container = map.getContainer();
+    const w = container.clientWidth || map.getSize().x || 800;
+    const h = container.clientHeight || map.getSize().y || 600;
+    const dpr = window.devicePixelRatio || 1;
+
+    const targetWidth = Math.round(w * dpr);
+    const targetHeight = Math.round(h * dpr);
+
+    const origin = map.containerPointToLayerPoint([0, 0]);
+
+    if (hCanvas) {
+      L.DomUtil.setPosition(hCanvas, origin);
+      hCanvas.style.width = `${w}px`;
+      hCanvas.style.height = `${h}px`;
+      if (hCanvas.width !== targetWidth || hCanvas.height !== targetHeight) {
+        hCanvas.width = targetWidth;
+        hCanvas.height = targetHeight;
+      }
+    }
+
+    if (wCanvas) {
+      L.DomUtil.setPosition(wCanvas, origin);
+      wCanvas.style.width = `${w}px`;
+      wCanvas.style.height = `${h}px`;
+      if (wCanvas.width !== targetWidth || wCanvas.height !== targetHeight) {
+        wCanvas.width = targetWidth;
+        wCanvas.height = targetHeight;
+      }
+    }
+  }, []);
+
+  const syncCanvasDimensions = syncCanvasSizeAndPosition;
+
+  // =========================================================================
+  // 1. Matte, Domain-Warped Organic Scalar Field Heatmap (z-index: 410)
+  //    No radial circles, no hard bounding box; transparent when v < 0.08
+  // =========================================================================
+  const renderHeatmap = useCallback(() => {
+    const canvas = heatmapCanvasRef.current;
+    const map = mapInstanceRef.current;
+    if (!canvas || !map) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    syncCanvasSizeAndPosition();
+
+    const dpr = window.devicePixelRatio || 1;
+    const width = canvas.width / dpr;
+    const height = canvas.height / dpr;
+
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    if (!showPlumesRef.current) {
+      ctx.restore();
+      return;
+    }
+
+    // Normal matte alpha blending (no neon screen blend)
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.imageSmoothingEnabled = true;
+
+    // Ensure offscreen grid canvas exists
+    if (!offscreenCanvasRef.current && typeof document !== 'undefined') {
+      const oc = document.createElement('canvas');
+      oc.width = GRID_W;
+      oc.height = GRID_H;
+      offscreenCanvasRef.current = oc;
+      const octx = oc.getContext('2d');
+      offscreenCtxRef.current = octx;
+      if (octx) {
+        imageDataRef.current = octx.createImageData(GRID_W, GRID_H);
+      }
+    }
+
+    const offCtx = offscreenCtxRef.current;
+    const offCanvas = offscreenCanvasRef.current;
+    const imgData = imageDataRef.current;
+    if (!offCtx || !offCanvas || !imgData) {
+      ctx.restore();
+      return;
+    }
+
+    const bounds = map.getBounds();
+    const southWest = bounds.getSouthWest();
+    const northEast = bounds.getNorthEast();
+    const minLat = southWest.lat;
+    const maxLat = northEast.lat;
+    const minLon = southWest.lng;
+    const maxLon = northEast.lng;
+    const dLat = (maxLat - minLat) / GRID_H;
+    const dLon = (maxLon - minLon) / GRID_W;
+
+    const activeCells = cellsRef.current;
+    const trajectories = computeCellTrajectories(activeCells);
+    const currentMode = overlayModeRef.current;
+
+    // Pre-calculate storm cell parameters outside the grid loop for high performance
+    const preparedCells = activeCells.map((cell) => {
+      const traj = trajectories.find((t) => t.cellId.startsWith(cell.id.split('-h')[0]));
+      const bearingRad = traj ? (traj.bearingDeg * Math.PI) / 180 : (68 * Math.PI) / 180;
+      const cosLat = Math.cos((cell.lat * Math.PI) / 180);
+      const rDeg = Math.max(cell.radiusKm / 111.32, 0.28);
+
+      let weight = cell.occurrenceProb;
+      if (currentMode === 'flash_density') {
+        weight = Math.min(1.0, (cell.flashDensity + 8) / 36);
+      } else if (currentMode === 'uncertainty') {
+        weight = cell.totalUncertainty;
+      }
+
+      return {
+        lat: cell.lat,
+        lon: cell.lon,
+        cosLat,
+        rDeg,
+        cosTheta: Math.cos(bearingRad),
+        sinTheta: Math.sin(bearingRad),
+        weight,
+      };
+    });
+
+    const data = imgData.data;
+
+    for (let y = 0; y < GRID_H; y++) {
+      const lat = maxLat - y * dLat;
+      const yRowOffset = y * GRID_W * 4;
+
+      for (let x = 0; x < GRID_W; x++) {
+        const lon = minLon + x * dLon;
+
+        // Smooth synoptic convergence trough (fades smoothly in all directions without any bounding box)
+        const troughLat = 20.0 + 0.60 * (88.0 - lon);
+        const distToTrough = Math.abs(lat - troughLat);
+        const troughFactor = 0.14 * Math.exp(-(distToTrough * distToTrough) / 8.0) * Math.max(0, 1.0 - Math.abs(lon - 82.0) / 14.0);
+        let field = troughFactor;
+
+        // Storm cell plumes with multi-octave domain warping & elliptical wind-shear elongation
+        for (let i = 0; i < preparedCells.length; i++) {
+          const cell = preparedCells[i];
+          const dLatDeg = lat - cell.lat;
+          const dLonDeg = (lon - cell.lon) * cell.cosLat;
+
+          // Fast bounding box rejection (skip points further than 4 radii)
+          if (Math.abs(dLatDeg) > cell.rDeg * 3.8 || Math.abs(dLonDeg) > cell.rDeg * 4.5) {
+            continue;
+          }
+
+          // Elliptical wind-shear coordinate rotation along storm velocity vector
+          const xAlong = dLonDeg * cell.cosTheta + dLatDeg * cell.sinTheta;
+          const yCross = -dLonDeg * cell.sinTheta + dLatDeg * cell.cosTheta;
+
+          // Asymmetric downwind elongation (downwind anvil vs upwind core)
+          const aRadius = xAlong >= 0 ? cell.rDeg * 1.65 : cell.rDeg * 0.95;
+          const bRadius = cell.rDeg * 1.15;
+
+          // Multi-octave trigonometric domain warping pseudo-noise
+          const warp1 = 0.16 * Math.sin(2.4 * lat + 1.8 * lon) + 0.08 * Math.cos(4.8 * lat - 3.6 * lon);
+          const warp2 = 0.16 * Math.cos(2.8 * lat - 1.5 * lon) + 0.08 * Math.sin(5.2 * lat + 4.2 * lon);
+
+          const xNorm = xAlong / aRadius + warp1;
+          const yNorm = yCross / bRadius + warp2;
+          const distSq = xNorm * xNorm + yNorm * yNorm;
+
+          if (distSq < 4.2) {
+            // Smooth organic bell plume
+            const plume = cell.weight * Math.exp(-distSq / 1.55);
+            // Soft saturation accumulation
+            field = field + plume * (1.0 - 0.45 * field);
+          }
+        }
+
+        // Clamp field to [0, 1]
+        const val = Math.min(1.0, Math.max(0.0, field));
+
+        // Zero-intensity transparent cutoff (v < 0.08 => alpha = 0, no light-blue bounding box)
+        let r = 0, g = 0, b = 0, a = 0;
+
+        if (val >= 0.08) {
+          // Smoothly ramp alpha from 0 at val = 0.08 up to 0.62 (158 in 0-255 scale) at val = 1.0
+          const normAlpha = ((val - 0.08) / 0.92) * 0.62;
+          a = Math.round(normAlpha * 255);
+
+          const t = (val - 0.08) / 0.92;
+
+          if (currentMode === 'uncertainty') {
+            // Slate Indigo (#3b4ca8) -> Deep Teal (#1b6b88) -> Warm Amber (#d97706) -> Rose (#be185d)
+            if (t <= 0.33) {
+              const u = t / 0.33;
+              r = Math.round(27 + (59 - 27) * u);
+              g = Math.round(107 + (76 - 107) * u);
+              b = Math.round(136 + (168 - 136) * u);
+            } else if (t <= 0.67) {
+              const u = (t - 0.33) / 0.34;
+              r = Math.round(59 + (217 - 59) * u);
+              g = Math.round(76 + (119 - 76) * u);
+              b = Math.round(168 + (6 - 168) * u);
+            } else {
+              const u = (t - 0.67) / 0.33;
+              r = Math.round(217 + (190 - 217) * u);
+              g = Math.round(119 + (24 - 119) * u);
+              b = Math.round(6 + (93 - 6) * u);
+            }
+          } else {
+            // Natural Windy Matte Palette:
+            // Deep Oceanic Teal (#1b6b88) -> Slate Indigo (#3b4ca8) -> Muted Purple (#7e3af2) -> Rich Rose-Magenta (#be185d)
+            if (t <= 0.32) {
+              const u = t / 0.32;
+              r = Math.round(27 + (59 - 27) * u);
+              g = Math.round(107 + (76 - 107) * u);
+              b = Math.round(136 + (168 - 136) * u);
+            } else if (t <= 0.68) {
+              const u = (t - 0.32) / 0.36;
+              r = Math.round(59 + (126 - 59) * u);
+              g = Math.round(76 + (58 - 76) * u);
+              b = Math.round(168 + (242 - 168) * u);
+            } else {
+              const u = (t - 0.68) / 0.32;
+              r = Math.round(126 + (190 - 126) * u);
+              g = Math.round(58 + (24 - 58) * u);
+              b = Math.round(242 + (93 - 242) * u);
+            }
+          }
+        }
+
+        const pIdx = yRowOffset + x * 4;
+        data[pIdx] = r;
+        data[pIdx + 1] = g;
+        data[pIdx + 2] = b;
+        data[pIdx + 3] = a;
+      }
+    }
+
+    offCtx.putImageData(imgData, 0, 0);
+    ctx.drawImage(offCanvas, 0, 0, width, height);
+
+    ctx.restore();
+  }, [syncCanvasDimensions]);
+
+  // =========================================================================
+  // 2. Divergence-Free Rotational Wind Field via Streamfunction (z-index: 420)
+  //    div(u, v) === 0: no collision seam, no vertical convergence line
+  // =========================================================================
+  useEffect(() => {
+    const canvas = windCanvasRef.current;
+    if (!canvas || !showWindParticles || !mapReady) {
+      if (animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
+        animationFrameIdRef.current = null;
+      }
+      return;
+    }
+
+    let isRunning = true;
+
+    const animateWind = () => {
+      if (!isRunning || !canvas || !mapInstanceRef.current) return;
+
+      const mapInstance = mapInstanceRef.current;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      syncCanvasSizeAndPosition();
+
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.width / dpr;
+      const height = canvas.height / dpr;
+
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const bounds = mapInstance.getBounds();
+      const southWest = bounds.getSouthWest();
+      const northEast = bounds.getNorthEast();
+
+      const particles = particlesRef.current;
+      const activeCells = cellsRef.current;
+
+      // Divergence-Free 2D Streamfunction psi(lat, lon)
+      // Combines synoptic wave sin(lat * 0.12) * 1.8 - lon * 0.08
+      // plus smooth Gaussian vortex potentials -strength * exp(-distSq / radiusSq)
+      const samplePsi = (lat: number, lon: number): number => {
+        let psi = Math.sin(lat * 0.12) * 1.8 - lon * 0.08;
+
+        for (let cIdx = 0; cIdx < activeCells.length; cIdx++) {
+          const cell = activeCells[cIdx];
+          const cosLat = Math.cos((cell.lat * Math.PI) / 180);
+          const dLon = (lon - cell.lon) * cosLat;
+          const dLat = lat - cell.lat;
+          const distSq = dLon * dLon + dLat * dLat;
+          const radiusDeg = Math.max((cell.radiusKm * 2.8) / 111.32, 0.6);
+          const radiusSq = radiusDeg * radiusDeg;
+
+          if (distSq < radiusSq * 5.0) {
+            const strength = 0.32 * Math.min(1.0, (cell.occurrenceProb || 0.6) * 1.25);
+            psi -= strength * Math.exp(-distSq / radiusSq);
+          }
+        }
+
+        return psi;
+      };
+
+      const eps = 0.04;
+      const speedScale = 0.20;
+      const minSpeedFloor = 0.024;
+
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+
+        // Central finite differences on divergence-free streamfunction
+        // u = (psi(lat + eps, lon) - psi(lat - eps, lon)) / (2 * eps)
+        // v = -(psi(lat, lon + eps) - psi(lat, lon - eps)) / (2 * eps)
+        const uRaw = (samplePsi(p.lat + eps, p.lon) - samplePsi(p.lat - eps, p.lon)) / (2 * eps);
+        const vRaw = -(samplePsi(p.lat, p.lon + eps) - samplePsi(p.lat, p.lon - eps)) / (2 * eps);
+
+        let u = uRaw * speedScale;
+        let v = vRaw * speedScale;
+
+        // Enforce minimum particle speed floor so particles flow continuously
+        const currentSpeed = Math.sqrt(u * u + v * v);
+        if (currentSpeed < minSpeedFloor) {
+          const boost = minSpeedFloor / (currentSpeed || 0.001);
+          u *= boost;
+          v *= boost;
+        }
+
+        // Advance particle position
+        p.prevLat = p.lat;
+        p.prevLon = p.lon;
+        p.lon += u * p.speedMultiplier;
+        p.lat += v * p.speedMultiplier;
+        p.age++;
+
+        // Random respawn across full viewport bounds so density stays completely uniform
+        if (
+          p.age >= p.maxAge ||
+          p.lat < southWest.lat - 0.5 ||
+          p.lat > northEast.lat + 0.5 ||
+          p.lon < southWest.lng - 0.5 ||
+          p.lon > northEast.lng + 0.5
+        ) {
+          p.lat = southWest.lat + Math.random() * (northEast.lat - southWest.lat);
+          p.lon = southWest.lng + Math.random() * (northEast.lng - southWest.lng);
+          p.prevLat = p.lat;
+          p.prevLon = p.lon;
+          p.age = 0;
+          p.maxAge = 60 + Math.floor(Math.random() * 60);
+          continue;
+        }
+
+        const pt1 = mapInstance.latLngToContainerPoint([p.lat, p.lon]);
+
+        // Culling
+        if (pt1.x < -30 || pt1.x > width + 30 || pt1.y < -30 || pt1.y > height + 30) {
+          continue;
+        }
+
+        // Angle and streak length: 10–14px
+        const screenSpeed = Math.sqrt(u * u + v * v) * 95;
+        const streakLen = Math.min(14, Math.max(10, screenSpeed * 5.2 * p.speedMultiplier));
+        const angle = Math.atan2(-v, u);
+
+        const startX = pt1.x - Math.cos(angle) * streakLen;
+        const startY = pt1.y - Math.sin(angle) * streakLen;
+
+        // Smooth lifecycle opacity curve (peak 0.55)
+        const lifeFraction = p.age / p.maxAge;
+        const alpha = Math.sin(lifeFraction * Math.PI) * 0.55;
+
+        // Tapered fading tail using linear gradient along the streak
+        const grad = ctx.createLinearGradient(startX, startY, pt1.x, pt1.y);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        grad.addColorStop(1, `rgba(255, 255, 255, ${alpha.toFixed(3)})`);
+
+        // Draw visible 10–14px silky streamline wisp (lineWidth: 1.15)
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.15;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(pt1.x, pt1.y);
+        ctx.stroke();
+
+        // Subtle 3.5px directional chevron tip at the leading edge
+        const chevLen = 3.5;
+        const wing1X = pt1.x - chevLen * Math.cos(angle - 0.52);
+        const wing1Y = pt1.y - chevLen * Math.sin(angle - 0.52);
+        const wing2X = pt1.x - chevLen * Math.cos(angle + 0.52);
+        const wing2Y = pt1.y - chevLen * Math.sin(angle + 0.52);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${(alpha * 0.95).toFixed(3)})`;
+        ctx.lineWidth = 1.15;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(wing1X, wing1Y);
+        ctx.lineTo(pt1.x, pt1.y);
+        ctx.lineTo(wing2X, wing2Y);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+      animationFrameIdRef.current = requestAnimationFrame(animateWind);
+    };
+
+    animationFrameIdRef.current = requestAnimationFrame(animateWind);
+
+    return () => {
+      isRunning = false;
+      if (animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
+        animationFrameIdRef.current = null;
+      }
+    };
+  }, [showWindParticles, mapReady, syncCanvasSizeAndPosition]);
+
+  // =========================================================================
+  // Initialize Leaflet Map ONCE on Mount (Never re-initialize on horizon ticks)
+  // =========================================================================
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
@@ -76,24 +584,77 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
       center: [22.5, 79.0],
       zoom: 5,
       minZoom: 4,
-      maxZoom: 10,
+      maxZoom: 14,
       zoomControl: false,
     });
 
-    // API-key-free dark basemap tile layer (Esri Dark Gray Canvas)
+    // 1. Create custom Leaflet panes inside single stacking context below markers & labels
+    const heatmapPane = map.createPane('heatmapPane');
+    heatmapPane.style.zIndex = '410';
+    heatmapPane.style.pointerEvents = 'none';
+
+    const windPane = map.createPane('windPane');
+    windPane.style.zIndex = '420';
+    windPane.style.pointerEvents = 'none';
+
+    const labelsPane = map.createPane('labelsPane');
+    labelsPane.style.zIndex = '650';
+    labelsPane.style.pointerEvents = 'none';
+
+    // 2. Mount Heatmap & Wind Canvases directly inside Leaflet panes with explicit pixel dimensions
+    const container = map.getContainer();
+    const w = container.clientWidth || map.getSize().x || 800;
+    const h = container.clientHeight || map.getSize().y || 600;
+    const dpr = window.devicePixelRatio || 1;
+
+    const hCanvas = document.createElement('canvas');
+    hCanvas.className = 'apm-heatmap-canvas';
+    hCanvas.style.position = 'absolute';
+    hCanvas.style.pointerEvents = 'none';
+    hCanvas.style.zIndex = '410';
+    hCanvas.style.width = `${w}px`;
+    hCanvas.style.height = `${h}px`;
+    hCanvas.width = Math.round(w * dpr);
+    hCanvas.height = Math.round(h * dpr);
+    heatmapPane.appendChild(hCanvas);
+    heatmapCanvasRef.current = hCanvas;
+
+    const wCanvas = document.createElement('canvas');
+    wCanvas.className = 'apm-wind-canvas';
+    wCanvas.style.position = 'absolute';
+    wCanvas.style.pointerEvents = 'none';
+    wCanvas.style.zIndex = '420';
+    wCanvas.style.width = `${w}px`;
+    wCanvas.style.height = `${h}px`;
+    wCanvas.width = Math.round(w * dpr);
+    wCanvas.height = Math.round(h * dpr);
+    windPane.appendChild(wCanvas);
+    windCanvasRef.current = wCanvas;
+
+    // 3. Esri World Imagery Satellite Tiles (Darkened relief filter via CSS)
     L.tileLayer(
-      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       {
         attribution:
-          'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ | India Meteorological Domain (6.0°N–38.0°N, 68.0°E–98.0°E)',
+          'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP | Pan-India (6.0°N–38.0°N, 68.0°E–98.0°E)',
         maxZoom: 16,
+      }
+    ).addTo(map);
+
+    // 4. Esri Reference Boundaries & Places (Mounted in top labelsPane at z-index: 650 with opacity 0.9)
+    L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      {
+        maxZoom: 16,
+        opacity: 0.9,
+        pane: 'labelsPane',
       }
     ).addTo(map);
 
     // Zoom control in bottom right
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    // Create layer groups
+    // Create LayerGroups for in-place data updates (markerPane: z-index 600)
     rangeRingsGroupRef.current = L.layerGroup().addTo(map);
     trajectoryLayerGroupRef.current = L.layerGroup().addTo(map);
     cellLayerGroupRef.current = L.layerGroup().addTo(map);
@@ -101,147 +662,282 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
     mapInstanceRef.current = map;
 
+    // Immediate initial sync and render on mount
+    syncCanvasSizeAndPosition();
+    renderHeatmap();
+    setMapReady(true);
+
+    map.on('move', () => {
+      syncCanvasSizeAndPosition();
+      renderHeatmap();
+    });
+    map.on('zoom', () => {
+      syncCanvasSizeAndPosition();
+      renderHeatmap();
+    });
+    map.on('resize', () => {
+      syncCanvasSizeAndPosition();
+      renderHeatmap();
+    });
+    map.on('viewreset', () => {
+      syncCanvasSizeAndPosition();
+      renderHeatmap();
+    });
+
+    // ResizeObserver for zero-delay response to container resizing
+    const ro = new ResizeObserver(() => {
+      syncCanvasSizeAndPosition();
+      renderHeatmap();
+    });
+    if (mapContainerRef.current) {
+      ro.observe(mapContainerRef.current);
+    }
+
     return () => {
+      setMapReady(false);
+      ro.disconnect();
+      map.off('move');
+      map.off('zoom');
+      map.off('resize');
+      map.off('viewreset');
+      if (heatmapCanvasRef.current && heatmapCanvasRef.current.parentNode) {
+        heatmapCanvasRef.current.parentNode.removeChild(heatmapCanvasRef.current);
+      }
+      if (windCanvasRef.current && windCanvasRef.current.parentNode) {
+        windCanvasRef.current.parentNode.removeChild(windCanvasRef.current);
+      }
       map.remove();
       mapInstanceRef.current = null;
     };
-  }, []);
+  }, []); // Mount ONCE! Strictly preserve user pan & zoom
 
-  // Update Convective Cells & Overlays
+  // Redraw heatmap whenever cells, overlayMode, or showPlumes change (without touching Leaflet map)
+  useEffect(() => {
+    renderHeatmap();
+  }, [cells, overlayMode, showPlumes, renderHeatmap]);
+
+  // =========================================================================
+  // In-Place Smooth Update for Convective Cells & Floating Glass Badges
+  // =========================================================================
   useEffect(() => {
     const layer = cellLayerGroupRef.current;
     if (!layer || !mapInstanceRef.current) return;
 
     layer.clearLayers();
+    const trajectories = computeCellTrajectories(cells);
 
     cells.forEach((cell) => {
-      let fillColor = '#10b981';
-      let strokeColor = '#34d399';
-      let fillOpacity = 0.45;
-      let radiusMeters = cell.radiusKm * 1000;
+      let severityColor = '#10b981';
+      let severityBg = 'rgba(16, 185, 129, 0.25)';
+      const p = cell.occurrenceProb;
+      const isSevere = p >= 0.8 || cell.severity === 'extreme';
+      const traj = trajectories.find((t) => t.cellId.startsWith(cell.id.split('-h')[0]));
 
-      if (overlayMode === 'probability') {
-        const p = cell.occurrenceProb;
-        if (p >= 0.8) {
-          fillColor = '#ef4444'; // Red
-          strokeColor = '#f87171';
-          fillOpacity = 0.65;
-        } else if (p >= 0.6) {
-          fillColor = '#f97316'; // Orange
-          strokeColor = '#fb923c';
-          fillOpacity = 0.55;
-        } else if (p >= 0.35) {
-          fillColor = '#eab308'; // Amber
-          strokeColor = '#fde047';
-          fillOpacity = 0.45;
-        } else {
-          fillColor = '#10b981'; // Green
-          strokeColor = '#34d399';
-          fillOpacity = 0.35;
-        }
-      } else if (overlayMode === 'flash_density') {
-        const fd = cell.flashDensity;
-        if (fd >= 25) {
-          fillColor = '#f43f5e'; // Bright Rose/Magenta
-          strokeColor = '#fb7185';
-          fillOpacity = 0.70;
-        } else if (fd >= 15) {
-          fillColor = '#a855f7'; // Purple
-          strokeColor = '#c084fc';
-          fillOpacity = 0.60;
-        } else if (fd >= 8) {
-          fillColor = '#3b82f6'; // Blue
-          strokeColor = '#60a5fa';
-          fillOpacity = 0.50;
-        } else {
-          fillColor = '#06b6d4'; // Cyan
-          strokeColor = '#22d3ee';
-          fillOpacity = 0.40;
-        }
-      } else if (overlayMode === 'uncertainty') {
-        const u = cell.totalUncertainty;
-        if (u >= 0.7) {
-          fillColor = '#ec4899'; // High uncertainty warning pink
-          strokeColor = '#f472b6';
-          fillOpacity = 0.60;
-        } else if (u >= 0.45) {
-          fillColor = '#eab308';
-          strokeColor = '#facc15';
-          fillOpacity = 0.50;
-        } else {
-          fillColor = '#14b8a6'; // Low uncertainty teal
-          strokeColor = '#2dd4bf';
-          fillOpacity = 0.40;
-        }
+      if (p >= 0.8) {
+        severityColor = '#ef4444';
+        severityBg = 'rgba(239, 68, 68, 0.3)';
+      } else if (p >= 0.6) {
+        severityColor = '#f97316';
+        severityBg = 'rgba(249, 115, 22, 0.3)';
+      } else if (p >= 0.35) {
+        severityColor = '#eab308';
+        severityBg = 'rgba(234, 179, 8, 0.3)';
       }
 
-      // Main convective cell circle
-      const circle = L.circle([cell.lat, cell.lon], {
-        radius: radiusMeters,
-        color: strokeColor,
-        weight: selectedCell?.id === cell.id ? 3 : 1.5,
-        fillColor: fillColor,
-        fillOpacity: fillOpacity,
-        dashArray: overlayMode === 'uncertainty' ? '4, 4' : undefined,
-      });
+      // Rich Interactive Hover Tooltip & Popup Content with Solid Dark Slate Surface
+      const popupContent = `
+        <div style="
+          font-family: ui-sans-serif, system-ui;
+          min-width: 230px;
+          padding: 8px 10px;
+          background: rgba(9, 13, 22, 0.96);
+          border: 1px solid rgba(148, 163, 184, 0.25);
+          border-radius: 8px;
+          backdrop-filter: blur(12px);
+          -webkit-backdrop-filter: blur(12px);
+          box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85);
+          color: #f8fafc;
+        ">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; border-bottom: 1px solid rgba(51, 65, 85, 0.8); padding-bottom: 5px;">
+            <div style="font-weight: 700; font-size: 13px; color: #38bdf8; display: flex; align-items: center; gap: 4px;">
+              ⚡ ${cell.name}
+            </div>
+            <span style="font-size: 9px; font-weight: 800; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; background: ${severityBg}; color: ${severityColor};">
+              ${cell.severity}
+            </span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; margin-bottom: 6px;">
+            <div><span style="color: #94a3b8;">Horizon:</span> <strong style="color: #38bdf8;">${horizon.label}</strong></div>
+            <div><span style="color: #94a3b8;">Location:</span> <strong>${cell.lat.toFixed(2)}°N, ${cell.lon.toFixed(2)}°E</strong></div>
+            <div><span style="color: #94a3b8;">Occurrence:</span> <strong style="color: #facc15;">${Math.round(cell.occurrenceProb * 100)}%</strong></div>
+            <div><span style="color: #94a3b8;">Flash Rate:</span> <strong style="color: #f43f5e;">${cell.flashDensity} fl/km²</strong></div>
+          </div>
+          <div style="font-size: 10px; background: rgba(15, 23, 42, 0.8); border-radius: 6px; padding: 6px; border: 1px solid rgba(51, 65, 85, 0.6); line-height: 1.4;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+              <span style="color: #94a3b8;">Thermodynamics:</span>
+              <span>CAPE ${cell.cape} J/kg | CIN ${cell.cin} J/kg</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+              <span style="color: #94a3b8;">Motion Vector:</span>
+              <span style="color: #facc15;">${Math.round(traj?.speedKmH || 38)} km/h towards ${traj?.directionLabel || 'ENE'} (${traj?.bearingDeg || 68}°)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span style="color: #94a3b8;">Uncertainty (Total):</span>
+              <span>±${Math.round(cell.totalUncertainty * 100)}% (alea: ±${Math.round(cell.aleatoricUncertainty * 100)}%)</span>
+            </div>
+          </div>
+        </div>
+      `;
 
-      // Inner core circle for high-intensity convection
-      if (cell.occurrenceProb > 0.6 || cell.flashDensity > 15) {
-        L.circle([cell.lat, cell.lon], {
-          radius: radiusMeters * 0.4,
-          color: '#ffffff',
-          weight: 1,
-          fillColor: '#ffffff',
-          fillOpacity: 0.35,
-        }).addTo(layer);
-      }
-
-      // Tooltip
-      circle.bindTooltip(
-        `<div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 4px 6px; background: #0f172a; color: #f8fafc; border: 1px solid #334155; border-radius: 4px;">
-          <div style="font-weight: 700; color: #38bdf8;">${cell.name} (${horizon.label})</div>
-          <div>Prob: <span style="font-weight: 600; color: #facc15;">${Math.round(cell.occurrenceProb * 100)}%</span></div>
-          <div>Flash Rate: <span style="font-weight: 600; color: #f43f5e;">${cell.flashDensity} fl/km²/15m</span></div>
-          <div>CAPE: ${cell.cape} J/kg | CIN: ${cell.cin} J/kg</div>
-          <div>Uncertainty: ±${(cell.totalUncertainty * 100).toFixed(0)}%</div>
-        </div>`,
-        { sticky: true, opacity: 0.95 }
-      );
-
-      circle.on('click', () => {
-        onSelectCell(cell);
-      });
-
-      circle.addTo(layer);
-
-      // Label marker
+      // Compact floating glassmorphic badge marker
       if (showLabels) {
-        const textIcon = L.divIcon({
-          className: 'storm-cell-label',
-          html: `<div style="
-            background: rgba(15, 23, 42, 0.85);
-            backdrop-filter: blur(4px);
-            border: 1px solid rgba(56, 189, 248, 0.4);
-            border-radius: 4px;
-            padding: 2px 6px;
-            color: #f1f5f9;
-            font-size: 10px;
-            font-weight: 600;
-            white-space: nowrap;
-            pointer-events: none;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-          ">
-            ⚡ ${cell.name.split(' ')[0]} <span style="color: #facc15;">${Math.round(cell.occurrenceProb * 100)}%</span>
-          </div>`,
-          iconSize: [80, 20],
-          iconAnchor: [40, 10],
+        const shortName = cell.name.split(' ')[0];
+        const probPct = Math.round(cell.occurrenceProb * 100);
+
+        const badgeIcon = L.divIcon({
+          className: 'floating-cell-badge',
+          html: `
+            <div style="position: relative; display: inline-block;">
+              ${isSevere ? '<div class="severe-pulse-ring"></div>' : ''}
+              <div class="glass-cell-pill" style="
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                background: rgba(9, 13, 22, 0.92);
+                border: 1px solid rgba(255, 255, 255, 0.22);
+                border-left: 3px solid ${severityColor};
+                border-radius: 9999px;
+                padding: 2px 7px 2px 6px;
+                color: #f8fafc;
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+                font-size: 11px;
+                font-weight: 600;
+                white-space: nowrap;
+                cursor: pointer;
+              ">
+                <span style="width: 5px; height: 5px; border-radius: 50%; background: ${severityColor}; display: inline-block;"></span>
+                <span>${shortName}</span>
+                <span style="color: #facc15; font-weight: 700; font-family: ui-monospace, monospace; margin-left: 2px;">${probPct}%</span>
+              </div>
+            </div>
+          `,
+          iconSize: [96, 22],
+          iconAnchor: [48, 11],
         });
-        L.marker([cell.lat, cell.lon], { icon: textIcon, interactive: false }).addTo(layer);
+
+        const badgeMarker = L.marker([cell.lat, cell.lon], { icon: badgeIcon });
+        badgeMarker.on('click', () => onSelectCell(cell));
+        badgeMarker.bindTooltip(popupContent, { sticky: true, opacity: 1.0 });
+        badgeMarker.addTo(layer);
       }
     });
-  }, [cells, overlayMode, horizon, selectedCell, showLabels, onSelectCell]);
+  }, [cells, overlayMode, horizon, showLabels, onSelectCell]);
 
-  // Update Stations & DWR Range Rings
+  // =========================================================================
+  // In-Place Smooth Update for Trajectory Motion Vectors Overlay
+  // =========================================================================
+  useEffect(() => {
+    const trajGroup = trajectoryLayerGroupRef.current;
+    if (!trajGroup || !mapInstanceRef.current) return;
+
+    trajGroup.clearLayers();
+    if (!showTrajectories || cells.length === 0) return;
+
+    const vectors = computeCellTrajectories(cells);
+
+    vectors.forEach((vec) => {
+      const originCell = cells.find((c) => c.id.startsWith(vec.cellId.split('-h')[0]));
+      const fullPathLatLngs: L.LatLngExpression[] = [];
+
+      if (originCell) {
+        fullPathLatLngs.push([originCell.lat, originCell.lon]);
+      }
+      vec.points.forEach((p) => fullPathLatLngs.push([p.lat, p.lon]));
+
+      // 1. Subtle glowing trail backdrop
+      L.polyline(fullPathLatLngs, {
+        color: '#facc15',
+        weight: 6,
+        opacity: 0.25,
+      }).addTo(trajGroup);
+
+      // 2. Animated dash-flow polyline
+      const polyline = L.polyline(fullPathLatLngs, {
+        className: 'animated-trajectory-path',
+        color: '#facc15',
+        weight: 2.5,
+        opacity: 0.95,
+      });
+
+      polyline.bindTooltip(
+        `
+          <div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 6px 8px; background: rgba(9, 13, 22, 0.96); color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 6px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
+            <div style="font-weight: 700; color: #facc15;">⚡ ${vec.cellName} Trajectory</div>
+            <div style="margin: 2px 0;">Velocity: <strong>${vec.speedKmH} km/h</strong> towards <strong>${vec.directionLabel} (${vec.bearingDeg}°)</strong></div>
+            <div style="font-size: 10px; color: #94a3b8;">Extrapolated Path: T+0 → +15m → +30m → +45m → +60m</div>
+          </div>
+        `,
+        { sticky: true, opacity: 1.0 }
+      );
+      polyline.addTo(trajGroup);
+
+      // 3. Milestone dots (+15m, +30m, +45m, +60m)
+      vec.points.forEach((pt, ptIdx) => {
+        const isCurrent = pt.step === horizon.step;
+        const radius = isCurrent ? 6 : 4;
+        const fillColor = isCurrent ? '#f43f5e' : ptIdx === 3 ? '#ec4899' : '#facc15';
+
+        const dot = L.circleMarker([pt.lat, pt.lon], {
+          radius: radius,
+          color: '#ffffff',
+          weight: 1.5,
+          fillColor: fillColor,
+          fillOpacity: 1.0,
+        });
+
+        dot.bindTooltip(
+          `
+            <div style="font-size: 10px; font-weight: 600; padding: 3px 6px; background: rgba(9, 13, 22, 0.96); color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 4px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
+              ${vec.cellName.split(' ')[0]} @ <strong>${pt.label}</strong>
+              <div style="color: #94a3b8; font-size: 9px;">${pt.lat.toFixed(2)}°N, ${pt.lon.toFixed(2)}°E</div>
+            </div>
+          `,
+          { direction: 'top', offset: [0, -6], opacity: 1.0 }
+        );
+
+        dot.addTo(trajGroup);
+      });
+
+      // 4. Directional arrowhead at terminal point (+60m)
+      const lastPoint = vec.points[vec.points.length - 1];
+      const arrowIcon = L.divIcon({
+        className: 'motion-vector-arrow',
+        html: `
+          <div style="
+            transform: rotate(${vec.bearingDeg - 90}deg);
+            color: #facc15;
+            font-size: 16px;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-shadow: 0 0 8px rgba(0,0,0,0.9), 0 0 4px #eab308;
+            pointer-events: none;
+          ">
+            ➤
+          </div>
+        `,
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      });
+
+      L.marker([lastPoint.lat, lastPoint.lon], { icon: arrowIcon, interactive: false }).addTo(trajGroup);
+    });
+  }, [cells, showTrajectories, horizon]);
+
+  // =========================================================================
+  // In-Place Update for Stations & DWR 250km Radar Rings
+  // =========================================================================
   useEffect(() => {
     const stGroup = stationLayerGroupRef.current;
     const ringGroup = rangeRingsGroupRef.current;
@@ -253,8 +949,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
     if (!showStations) return;
 
     stations.forEach((st) => {
-      // Station pin styling based on type
-      let iconColor = '#38bdf8'; // Sky blue for radar
+      let iconColor = '#38bdf8';
       let iconSymbol = '📡';
 
       if (st.type === 'satellite') {
@@ -265,149 +960,75 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
         iconSymbol = '⚡';
       }
 
-      // Add DWR radar coverage 250km circle
+      // Subtle cyan-dashed 250km DWR radar rings
       if (st.type === 'radar' && showRangeRings && st.status === 'online') {
         L.circle([st.lat, st.lon], {
           radius: st.rangeKm * 1000,
-          color: '#0284c7',
-          weight: 1,
-          opacity: 0.35,
-          fillColor: '#0284c7',
-          fillOpacity: 0.04,
-          dashArray: '5, 5',
+          color: '#38bdf8',
+          weight: 1.2,
+          opacity: 0.45,
+          fillColor: '#38bdf8',
+          fillOpacity: 0.03,
+          dashArray: '4, 6',
         }).addTo(ringGroup);
 
-        // 100km inner Doppler core range ring
         L.circle([st.lat, st.lon], {
           radius: 100 * 1000,
           color: '#38bdf8',
           weight: 0.8,
-          opacity: 0.25,
+          opacity: 0.30,
           fillOpacity: 0,
-          dashArray: '2, 4',
+          dashArray: '2, 5',
         }).addTo(ringGroup);
       }
 
-      // Custom HTML Marker for sensor station
       const markerIcon = L.divIcon({
         className: 'sensor-station-icon',
-        html: `<div style="
-          width: 22px;
-          height: 22px;
-          border-radius: 50%;
-          background: #0f172a;
-          border: 2px solid ${iconColor};
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 11px;
-          box-shadow: 0 0 10px ${iconColor}66;
-          cursor: pointer;
-        ">
-          ${iconSymbol}
-        </div>`,
+        html: `
+          <div style="
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1.5px solid ${iconColor};
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            box-shadow: 0 0 10px ${iconColor}55;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+          ">
+            ${iconSymbol}
+          </div>
+        `,
         iconSize: [22, 22],
         iconAnchor: [11, 11],
       });
 
       const marker = L.marker([st.lat, st.lon], { icon: markerIcon });
       marker.bindTooltip(
-        `<div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 4px; background: #0f172a; color: #f8fafc; border: 1px solid #334155; border-radius: 4px;">
-          <div style="font-weight: 700; color: ${iconColor};">${st.name}</div>
-          <div style="color: #94a3b8;">${st.description}</div>
-          <div style="font-size: 10px; color: #22c55e;">Status: ${st.status.toUpperCase()}</div>
-          ${st.band ? `<div style="font-size: 10px; color: #cbd5e1;">Band: ${st.band}</div>` : ''}
-          ${st.type === 'radar' ? `<div style="font-size: 10px; color: #38bdf8;">Range: ${st.rangeKm} km</div>` : ''}
-        </div>`,
-        { sticky: true }
+        `
+          <div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 6px 8px; background: rgba(9, 13, 22, 0.96); color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 6px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);">
+            <div style="font-weight: 700; color: ${iconColor}; font-size: 12px; margin-bottom: 2px;">${st.name}</div>
+            <div style="color: #94a3b8; font-size: 10px; margin-bottom: 4px;">${st.description}</div>
+            <div style="display: flex; gap: 8px; font-size: 10px;">
+              <span style="color: #22c55e; font-weight: 600;">STATUS: ${st.status.toUpperCase()}</span>
+              ${st.band ? `<span style="color: #cbd5e1;">BAND: ${st.band}</span>` : ''}
+              ${st.type === 'radar' ? `<span style="color: #38bdf8;">RANGE: ${st.rangeKm} km</span>` : ''}
+            </div>
+          </div>
+        `,
+        { sticky: true, opacity: 1.0 }
       );
 
       marker.addTo(stGroup);
     });
   }, [stations, showStations, showRangeRings]);
 
-  // Update Storm Trajectory Motion Vectors Overlay (+15m -> +30m -> +45m -> +60m)
-  useEffect(() => {
-    const trajGroup = trajectoryLayerGroupRef.current;
-    if (!trajGroup || !mapInstanceRef.current) return;
-
-    trajGroup.clearLayers();
-    if (!showTrajectories || cells.length === 0) return;
-
-    const vectors = computeCellTrajectories(cells);
-
-    vectors.forEach((vec) => {
-      const latlngs: L.LatLngExpression[] = vec.points.map((p) => [p.lat, p.lon]);
-
-      // Predicted motion vector polyline
-      const polyline = L.polyline(latlngs, {
-        color: '#facc15',
-        weight: 2.5,
-        opacity: 0.85,
-        dashArray: '5, 6',
-      });
-
-      // Tooltip along track with displacement speed and bearing
-      polyline.bindTooltip(
-        `<div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 5px 8px; background: #0f172a; color: #f8fafc; border: 1px solid #eab308; border-radius: 6px;">
-          <div style="font-weight: 700; color: #facc15;">⚡ ${vec.cellName} Trajectory</div>
-          <div>Velocity: <strong>${vec.speedKmH} km/h</strong> towards <strong>${vec.directionLabel} (${vec.bearingDeg}°)</strong></div>
-          <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">Track: +15m → +30m → +45m → +60m</div>
-        </div>`,
-        { sticky: true, opacity: 0.95 }
-      );
-
-      polyline.addTo(trajGroup);
-
-      // Trajectory waypoints (+15m, +30m, +45m, +60m)
-      vec.points.forEach((pt, ptIdx) => {
-        const isCurrent = pt.step === horizon.step;
-        const radius = isCurrent ? 5.5 : 3.5;
-        const fillColor = isCurrent ? '#f43f5e' : ptIdx === 3 ? '#ec4899' : '#facc15';
-
-        const dot = L.circleMarker([pt.lat, pt.lon], {
-          radius: radius,
-          color: '#ffffff',
-          weight: 1.5,
-          fillColor: fillColor,
-          fillOpacity: 0.95,
-        });
-
-        dot.bindTooltip(
-          `<div style="font-size: 10px; font-weight: 600; padding: 2px 4px; background: #0f172a; color: #f8fafc; border: 1px solid #334155;">
-            ${vec.cellName.split(' ')[0]} @ ${pt.label}
-          </div>`,
-          { direction: 'top', offset: [0, -4] }
-        );
-
-        dot.addTo(trajGroup);
-      });
-
-      // Vector head arrow marker at final point (+60m)
-      const lastPoint = vec.points[vec.points.length - 1];
-      const arrowIcon = L.divIcon({
-        className: 'motion-vector-arrow',
-        html: `<div style="
-          transform: rotate(${vec.bearingDeg - 90}deg);
-          color: #facc15;
-          font-size: 15px;
-          line-height: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          text-shadow: 0 0 6px #000;
-          pointer-events: none;
-        ">
-          ➤
-        </div>`,
-        iconSize: [16, 16],
-        iconAnchor: [8, 8],
-      });
-
-      L.marker([lastPoint.lat, lastPoint.lon], { icon: arrowIcon, interactive: false }).addTo(trajGroup);
-    });
-  }, [cells, showTrajectories, horizon]);
-
+  // =========================================================================
+  // Explicit User Navigation Handlers (Only places setView is called)
+  // =========================================================================
   const handleSelectRegion = (presetId: string) => {
     setActiveRegionPreset(presetId);
     const preset = SUB_REGION_PRESETS.find((p) => p.id === presetId);
@@ -418,233 +1039,353 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
   const resetView = () => {
     handleSelectRegion('all_india');
+    setShowStations(true);
+    setShowRangeRings(true);
   };
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '560px', overflow: 'hidden', borderRadius: '12px', border: '1px solid #334155' }}>
-      {/* The Leaflet Container */}
-      <div ref={mapContainerRef} style={{ width: '100%', height: '100%', minHeight: '560px', background: '#090d16' }} />
+    <div
+      className="map-3d-container satellite-terrain-tiles"
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        minHeight: '600px',
+        overflow: 'hidden',
+        borderRadius: '12px',
+        border: '1px solid #334155',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+      }}
+    >
+      {/* 3D Atmospheric Horizon Vignette */}
+      {is3DMode && <div className="atmospheric-horizon-vignette" />}
 
-      {/* Top Left: Overlay Switcher & Metrics Selector */}
+      {/* The Map Viewport (with smooth 3D tilt perspective support) */}
       <div
+        className={`map-3d-viewport ${is3DMode ? 'tilted' : 'flat'}`}
         style={{
-          position: 'absolute',
-          top: '14px',
-          left: '14px',
-          zIndex: 1000,
-          background: 'rgba(15, 23, 42, 0.88)',
-          backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(51, 65, 85, 0.9)',
-          borderRadius: '8px',
-          padding: '6px 8px',
-          display: 'flex',
-          gap: '6px',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          minHeight: '600px',
         }}
       >
-        <button
-          onClick={() => onOverlayModeChange('probability')}
+        {/* Leaflet Map Container (Mounts all layers in unified Leaflet stacking context: tilePane 200, heatmapPane 410, windPane 420, markerPane 600, labelsPane 650) */}
+        <div
+          ref={mapContainerRef}
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '6px 12px',
-            fontSize: '12px',
-            fontWeight: 600,
-            borderRadius: '6px',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-            background: overlayMode === 'probability' ? '#0284c7' : 'transparent',
-            color: overlayMode === 'probability' ? '#ffffff' : '#94a3b8',
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            minHeight: '600px',
+            background: '#040810',
           }}
-        >
-          <Activity size={14} />
-          Lightning Prob (%)
-        </button>
-
-        <button
-          onClick={() => onOverlayModeChange('flash_density')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '6px 12px',
-            fontSize: '12px',
-            fontWeight: 600,
-            borderRadius: '6px',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-            background: overlayMode === 'flash_density' ? '#7c3aed' : 'transparent',
-            color: overlayMode === 'flash_density' ? '#ffffff' : '#94a3b8',
-          }}
-        >
-          <Zap size={14} />
-          Flash Density (fl/km²)
-        </button>
-
-        <button
-          onClick={() => onOverlayModeChange('uncertainty')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '6px 12px',
-            fontSize: '12px',
-            fontWeight: 600,
-            borderRadius: '6px',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-            background: overlayMode === 'uncertainty' ? '#db2777' : 'transparent',
-            color: overlayMode === 'uncertainty' ? '#ffffff' : '#94a3b8',
-          }}
-        >
-          <AlertTriangle size={14} />
-          Uncertainty Bounds
-        </button>
+        />
       </div>
 
-      {/* Sub-Region Camera Zoom Presets */}
+      {/* Unified Top Controls Overlay: Never overlaps, wraps cleanly on narrower viewports */}
       <div
+        className="absolute top-3 left-3 right-3 z-[800] flex flex-col gap-2 pointer-events-none"
         style={{
           position: 'absolute',
-          top: '58px',
-          left: '14px',
-          zIndex: 1000,
-          background: 'rgba(15, 23, 42, 0.90)',
-          backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(51, 65, 85, 0.9)',
-          borderRadius: '8px',
-          padding: '4px 8px',
+          top: '12px',
+          left: '12px',
+          right: '12px',
+          zIndex: 800,
+          pointerEvents: 'none',
           display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
-          fontSize: '11px',
+          flexDirection: 'column',
+          gap: '8px',
         }}
       >
-        <span style={{ color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
-          <MapPin size={12} color="#38bdf8" /> Sub-Region:
-        </span>
-        <select
-          value={activeRegionPreset}
-          onChange={(e) => handleSelectRegion(e.target.value)}
+        {/* Row 1: Mode Switcher (Left) + Layer Toggle Bar (Right) */}
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 w-full"
           style={{
-            background: '#1e293b',
-            border: '1px solid #334155',
-            color: '#f8fafc',
-            borderRadius: '4px',
-            padding: '3px 8px',
-            fontSize: '11px',
-            cursor: 'pointer',
-            outline: 'none',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            width: '100%',
           }}
         >
-          {SUB_REGION_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name} {p.id === 'all_india' ? '[Default]' : ''}
-            </option>
-          ))}
-        </select>
-      </div>
+          {/* Mode Switcher Pill */}
+          <div
+            className="pointer-events-auto"
+            style={{
+              pointerEvents: 'auto',
+              background: 'rgba(15, 23, 42, 0.92)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              border: '1px solid rgba(51, 65, 85, 0.9)',
+              borderRadius: '8px',
+              padding: '5px 8px',
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.55)',
+            }}
+          >
+            <button
+              onClick={() => onOverlayModeChange('probability')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '5px 10px',
+                fontSize: '12px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                background: overlayMode === 'probability' ? '#0284c7' : 'transparent',
+                color: overlayMode === 'probability' ? '#ffffff' : '#94a3b8',
+              }}
+            >
+              <Activity size={14} />
+              Lightning Prob (%)
+            </button>
 
-      {/* Top Right: Layer Visibility & View Reset Controls */}
-      <div
-        style={{
-          position: 'absolute',
-          top: '14px',
-          right: '14px',
-          zIndex: 1000,
-          background: 'rgba(15, 23, 42, 0.88)',
-          backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(51, 65, 85, 0.9)',
-          borderRadius: '8px',
-          padding: '6px 10px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          fontSize: '12px',
-          color: '#cbd5e1',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
-        }}
-      >
-        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={showTrajectories}
-            onChange={(e) => setShowTrajectories(e.target.checked)}
-            style={{ accentColor: '#facc15' }}
-          />
-          <TrendingUp size={13} color="#facc15" /> Motion Vectors
-        </label>
+            <button
+              onClick={() => onOverlayModeChange('flash_density')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '5px 10px',
+                fontSize: '12px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                background: overlayMode === 'flash_density' ? '#7c3aed' : 'transparent',
+                color: overlayMode === 'flash_density' ? '#ffffff' : '#94a3b8',
+              }}
+            >
+              <Zap size={14} />
+              Flash Density (fl/km²)
+            </button>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={showStations}
-            onChange={(e) => setShowStations(e.target.checked)}
-            style={{ accentColor: '#38bdf8' }}
-          />
-          <Radio size={13} color="#38bdf8" /> Stations
-        </label>
+            <button
+              onClick={() => onOverlayModeChange('uncertainty')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '5px 10px',
+                fontSize: '12px',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                background: overlayMode === 'uncertainty' ? '#db2777' : 'transparent',
+                color: overlayMode === 'uncertainty' ? '#ffffff' : '#94a3b8',
+              }}
+            >
+              <AlertTriangle size={14} />
+              Uncertainty Bounds
+            </button>
+          </div>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={showRangeRings}
-            onChange={(e) => setShowRangeRings(e.target.checked)}
-            style={{ accentColor: '#0284c7' }}
-          />
-          <Layers size={13} color="#60a5fa" /> DWR 250km
-        </label>
+          {/* Layer Toggle Bar Pill */}
+          <div
+            className="pointer-events-auto"
+            style={{
+              pointerEvents: 'auto',
+              background: 'rgba(15, 23, 42, 0.92)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              border: '1px solid rgba(51, 65, 85, 0.9)',
+              borderRadius: '8px',
+              padding: '5px 10px',
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              gap: '10px',
+              fontSize: '11px',
+              color: '#cbd5e1',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.55)',
+            }}
+          >
+            {/* 3D Viewport Tilt Toggle */}
+            <button
+              onClick={() => setIs3DMode(!is3DMode)}
+              title="Toggle 3D Perspective Tilt"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: is3DMode ? '#0284c7' : '#1e293b',
+                border: '1px solid ' + (is3DMode ? '#38bdf8' : '#475569'),
+                borderRadius: '4px',
+                padding: '3px 7px',
+                color: '#f8fafc',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+                transition: 'all 0.2s',
+              }}
+            >
+              <Box size={13} color={is3DMode ? '#ffffff' : '#38bdf8'} />
+              3D Tilt
+            </button>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={showLabels}
-            onChange={(e) => setShowLabels(e.target.checked)}
-            style={{ accentColor: '#facc15' }}
-          />
-          <Eye size={13} color="#facc15" /> Labels
-        </label>
+            {/* Wind Particles Streamlines Toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showWindParticles}
+                onChange={(e) => setShowWindParticles(e.target.checked)}
+                style={{ accentColor: '#38bdf8' }}
+              />
+              <Wind size={13} color="#38bdf8" /> Wind Particles
+            </label>
 
-        <button
-          onClick={resetView}
-          title="Reset to Pan-India Overview (22.5°N, 79.0°E, Zoom 5)"
+            {/* Organic Convective Heatmap Toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showPlumes}
+                onChange={(e) => setShowPlumes(e.target.checked)}
+                style={{ accentColor: '#38bdf8' }}
+              />
+              <Sparkles size={13} color="#38bdf8" /> Heatmap
+            </label>
+
+            {/* Motion Vectors Toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showTrajectories}
+                onChange={(e) => setShowTrajectories(e.target.checked)}
+                style={{ accentColor: '#facc15' }}
+              />
+              <TrendingUp size={13} color="#facc15" /> Motion Vectors
+            </label>
+
+            {/* Stations Toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showStations}
+                onChange={(e) => setShowStations(e.target.checked)}
+                style={{ accentColor: '#38bdf8' }}
+              />
+              <Radio size={13} color="#38bdf8" /> Stations
+            </label>
+
+            {/* DWR 250km Range Rings */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showRangeRings}
+                onChange={(e) => setShowRangeRings(e.target.checked)}
+                style={{ accentColor: '#38bdf8' }}
+              />
+              <Layers size={13} color="#38bdf8" /> DWR 250km
+            </label>
+
+            {/* Floating Labels Toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={showLabels}
+                onChange={(e) => setShowLabels(e.target.checked)}
+                style={{ accentColor: '#facc15' }}
+              />
+              <Eye size={13} color="#facc15" /> Labels
+            </label>
+
+            {/* Reset Map Button */}
+            <button
+              onClick={resetView}
+              title="Reset to Pan-India Overview (22.5°N, 79.0°E, Zoom 5)"
+              style={{
+                background: '#1e293b',
+                border: '1px solid #475569',
+                borderRadius: '4px',
+                padding: '3px 8px',
+                color: '#f8fafc',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '11px',
+                transition: 'background 0.2s',
+              }}
+            >
+              <Compass size={13} />
+              Reset
+            </button>
+          </div>
+        </div>
+
+        {/* Row 2: Sub-Region Selector cleanly below without hardcoded top offset */}
+        <div
+          className="pointer-events-auto mt-1"
           style={{
-            background: '#1e293b',
-            border: '1px solid #475569',
-            borderRadius: '4px',
+            pointerEvents: 'auto',
+            background: 'rgba(15, 23, 42, 0.90)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            border: '1px solid rgba(51, 65, 85, 0.9)',
+            borderRadius: '8px',
             padding: '4px 8px',
-            color: '#f8fafc',
-            cursor: 'pointer',
-            display: 'flex',
+            display: 'inline-flex',
             alignItems: 'center',
-            gap: '4px',
+            gap: '6px',
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
             fontSize: '11px',
+            width: 'fit-content',
           }}
         >
-          <Compass size={13} />
-          Reset Map
-        </button>
+          <span style={{ color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+            <MapPin size={12} color="#38bdf8" /> Sub-Region:
+          </span>
+          <select
+            value={activeRegionPreset}
+            onChange={(e) => handleSelectRegion(e.target.value)}
+            style={{
+              background: '#1e293b',
+              border: '1px solid #334155',
+              color: '#f8fafc',
+              borderRadius: '4px',
+              padding: '3px 8px',
+              fontSize: '11px',
+              cursor: 'pointer',
+              outline: 'none',
+            }}
+          >
+            {SUB_REGION_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} {p.id === 'all_india' ? '[Default]' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      {/* Bottom Left: Dynamic Colorbar Legend */}
+      {/* Bottom Left: Windy-Style Dynamic Colorbar Legend */}
       <div
         style={{
           position: 'absolute',
           bottom: '24px',
           left: '14px',
           zIndex: 1000,
-          background: 'rgba(15, 23, 42, 0.90)',
-          backdropFilter: 'blur(8px)',
+          background: 'rgba(15, 23, 42, 0.94)',
+          backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)',
           border: '1px solid rgba(51, 65, 85, 0.9)',
           borderRadius: '8px',
-          padding: '8px 12px',
-          minWidth: '220px',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+          padding: '10px 14px',
+          minWidth: '250px',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6)',
           fontSize: '11px',
         }}
       >
@@ -659,35 +1400,56 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
         {overlayMode === 'probability' && (
           <div>
-            <div style={{ height: '8px', borderRadius: '4px', background: 'linear-gradient(to right, #10b981, #eab308, #f97316, #ef4444)' }} />
+            <div
+              style={{
+                height: '8px',
+                borderRadius: '4px',
+                background:
+                  'linear-gradient(to right, #1b6b88, #3b4ca8, #7e3af2, #be185d)',
+              }}
+            />
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', marginTop: '4px', fontSize: '10px' }}>
-              <span>0%</span>
-              <span>30%</span>
-              <span>60%</span>
-              <span>80%+</span>
+              <span>Ambient Ocean</span>
+              <span>Moderate</span>
+              <span>Convective</span>
+              <span>Severe Core</span>
             </div>
           </div>
         )}
 
         {overlayMode === 'flash_density' && (
           <div>
-            <div style={{ height: '8px', borderRadius: '4px', background: 'linear-gradient(to right, #06b6d4, #3b82f6, #a855f7, #f43f5e)' }} />
+            <div
+              style={{
+                height: '8px',
+                borderRadius: '4px',
+                background:
+                  'linear-gradient(to right, #1b6b88, #3b4ca8, #7e3af2, #be185d)',
+              }}
+            />
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', marginTop: '4px', fontSize: '10px' }}>
               <span>0</span>
               <span>8</span>
-              <span>15</span>
-              <span>30+</span>
+              <span>18</span>
+              <span>32+ fl/km²</span>
             </div>
           </div>
         )}
 
         {overlayMode === 'uncertainty' && (
           <div>
-            <div style={{ height: '8px', borderRadius: '4px', background: 'linear-gradient(to right, #14b8a6, #eab308, #ec4899)' }} />
+            <div
+              style={{
+                height: '8px',
+                borderRadius: '4px',
+                background: 'linear-gradient(to right, #3b4ca8, #1b6b88, #d97706, #be185d)',
+              }}
+            />
             <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', marginTop: '4px', fontSize: '10px' }}>
               <span>Low (±15%)</span>
               <span>Mod (±45%)</span>
-              <span>High (±75%+)</span>
+              <span>Elevated (±70%)</span>
+              <span>High (±90%+)</span>
             </div>
             {uncertaintyInflation > 1.2 && (
               <div style={{ marginTop: '6px', color: '#f43f5e', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -698,10 +1460,17 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
           </div>
         )}
 
+        {showWindParticles && (
+          <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #334155', color: '#38bdf8', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <Wind size={12} color="#38bdf8" />
+            <span>1,400 Wind Streamline Wisps Active</span>
+          </div>
+        )}
+
         {showTrajectories && (
-          <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #334155', color: '#facc15', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <div style={{ marginTop: '4px', color: '#facc15', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
             <TrendingUp size={12} color="#facc15" />
-            <span>Predicted Motion Vectors (+15m → +60m Extrapolated)</span>
+            <span>Extrapolated Storm Vectors (T+0 → +60m)</span>
           </div>
         )}
       </div>
@@ -714,19 +1483,20 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
             bottom: '24px',
             right: '14px',
             zIndex: 1000,
-            background: 'rgba(15, 23, 42, 0.94)',
-            backdropFilter: 'blur(10px)',
+            background: 'rgba(15, 23, 42, 0.95)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
             border: '1px solid #0284c7',
             borderRadius: '10px',
             padding: '12px 14px',
-            width: '270px',
-            boxShadow: '0 12px 30px rgba(0, 0, 0, 0.7)',
+            width: '280px',
+            boxShadow: '0 12px 30px rgba(0, 0, 0, 0.75)',
             fontSize: '11px',
             color: '#f8fafc',
           }}
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <span style={{ fontWeight: 700, fontSize: '12px', color: '#38bdf8' }}>{selectedCell.name}</span>
+            <span style={{ fontWeight: 700, fontSize: '13px', color: '#38bdf8' }}>{selectedCell.name}</span>
             <button
               onClick={() => onSelectCell(null)}
               style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '14px' }}
@@ -738,7 +1508,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', margin: '8px 0', borderBottom: '1px solid #334155', paddingBottom: '8px' }}>
             <div>
               <span style={{ color: '#94a3b8' }}>Coord:</span>
-              <div style={{ fontWeight: 600 }}>{selectedCell.lat}°N, {selectedCell.lon}°E</div>
+              <div style={{ fontWeight: 600 }}>{selectedCell.lat.toFixed(2)}°N, {selectedCell.lon.toFixed(2)}°E</div>
             </div>
             <div>
               <span style={{ color: '#94a3b8' }}>Radius:</span>

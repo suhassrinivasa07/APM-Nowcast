@@ -14,6 +14,7 @@ import {
 } from './types/nowcast';
 import {
   nowcastApi,
+  API_BASE_URL,
   HORIZON_DEFINITIONS,
   BENCHMARK_VERIFICATION_DATA,
 } from './api/nowcastApi';
@@ -77,7 +78,7 @@ export const App: React.FC = () => {
       console.error('Failed to load snapshot:', err);
       setApiError(
         err?.message ||
-          'Unable to connect to live APM-Nowcast FastAPI server (http://localhost:8000/api/v1). Ensure backend is running or switch to Simulation Mode.'
+          `Unable to connect to live APM-Nowcast FastAPI server (${API_BASE_URL}). Ensure backend is running or switch to Simulation Mode.`
       );
     } finally {
       setIsLoading(false);
@@ -264,7 +265,7 @@ export const App: React.FC = () => {
             <p style={{ margin: 0, color: '#94a3b8', fontSize: '13px', maxWidth: '620px', lineHeight: 1.5 }}>
               Could not fetch live nowcast inferences from{' '}
               <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px', color: '#38bdf8' }}>
-                http://localhost:8000/api/v1/nowcast/snapshot
+                {API_BASE_URL}/nowcast/snapshot
               </code>
               .<br />
               <span style={{ fontSize: '11px', color: '#f87171' }}>{apiError}</span>
