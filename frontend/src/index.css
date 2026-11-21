@@ -23,10 +23,28 @@ body {
   background-color: #090d16;
   color: #f8fafc;
   overflow-x: hidden;
+  /* Lock vertical scroll at app level — layout is 100vh */
+  overflow-y: hidden;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Spin animation for loading indicators */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+/* Pulsing live status dot */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.85); }
 }
 
 /* Custom scrollbars */

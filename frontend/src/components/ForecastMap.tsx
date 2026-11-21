@@ -46,6 +46,8 @@ interface ForecastMapProps {
   selectedCell: ConvectiveStormCell | null;
   onSelectCell: (cell: ConvectiveStormCell | null) => void;
   uncertaintyInflation: number;
+  /** Called once the Leaflet map is mounted, with a flyTo(lat, lon) imperative handle */
+  onFlyToReady?: (flyTo: (lat: number, lon: number) => void) => void;
 }
 
 interface WindParticle {
@@ -71,6 +73,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
   selectedCell,
   onSelectCell,
   uncertaintyInflation,
+  onFlyToReady,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const heatmapCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -86,6 +89,27 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
   const stationLayerGroupRef = useRef<L.LayerGroup | null>(null);
   const rangeRingsGroupRef = useRef<L.LayerGroup | null>(null);
   const trajectoryLayerGroupRef = useRef<L.LayerGroup | null>(null);
+
+  // Floating HUD overlay refs for Leaflet click & scroll isolation
+  const modeSwitcherRef = useRef<HTMLDivElement>(null);
+  const layerControlsRef = useRef<HTMLDivElement>(null);
+  const subRegionRef = useRef<HTMLDivElement>(null);
+  const legendRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const overlays = [
+      modeSwitcherRef.current,
+      layerControlsRef.current,
+      subRegionRef.current,
+      legendRef.current,
+    ];
+    overlays.forEach((el) => {
+      if (el) {
+        L.DomEvent.disableClickPropagation(el);
+        L.DomEvent.disableScrollPropagation(el);
+      }
+    });
+  }, []);
 
   // State refs to decouple active 60fps render loops from map re-initialization
   const cellsRef = useRef<ConvectiveStormCell[]>(cells);
@@ -672,6 +696,13 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
     mapInstanceRef.current = map;
 
+    // Register flyTo imperative handle for map-to-sidebar sync
+    if (onFlyToReady) {
+      onFlyToReady((lat: number, lon: number) => {
+        map.flyTo([lat, lon], Math.max(map.getZoom(), 7), { animate: true, duration: 1.2 });
+      });
+    }
+
     // Immediate initial sync and render on mount
     syncCanvasSizeAndPosition();
     renderHeatmap();
@@ -1068,6 +1099,18 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
     }
   }, [stations, showStations, showRangeRings, mapReady]);
 
+  // Escape key listener to close selected cluster inspector and popups
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedCell) {
+        mapInstanceRef.current?.closePopup();
+        onSelectCell(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedCell, onSelectCell]);
+
   // =========================================================================
   // Explicit User Navigation Handlers (Only places setView is called)
   // =========================================================================
@@ -1092,11 +1135,8 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
         position: 'relative',
         width: '100%',
         height: '100%',
-        minHeight: '600px',
         overflow: 'hidden',
-        borderRadius: '12px',
-        border: '1px solid #334155',
-        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+        borderRadius: 0,
       }}
     >
       {/* 3D Atmospheric Horizon Vignette */}
@@ -1109,10 +1149,9 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
           position: 'relative',
           width: '100%',
           height: '100%',
-          minHeight: '600px',
         }}
       >
-        {/* Leaflet Map Container (Mounts all layers in unified Leaflet stacking context: tilePane 200, heatmapPane 410, windPane 420, labelsPane 520, markerPane 600, tooltipPane 900, popupPane 950) */}
+        {/* Leaflet Map Container */}
         <div
           ref={mapContainerRef}
           style={{
@@ -1120,7 +1159,6 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
             inset: 0,
             width: '100%',
             height: '100%',
-            minHeight: '600px',
             background: '#040810',
           }}
         />
@@ -1155,6 +1193,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
         >
           {/* Mode Switcher Pill */}
           <div
+            ref={modeSwitcherRef}
             className="pointer-events-auto py-1 px-2 text-xs"
             style={{
               pointerEvents: 'auto',
@@ -1240,6 +1279,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
 
           {/* Layer Toggle Bar Pill */}
           <div
+            ref={layerControlsRef}
             className="pointer-events-auto py-1 px-2 text-xs"
             style={{
               pointerEvents: 'auto',
@@ -1375,6 +1415,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
 
         {/* Row 2: Sub-Region Selector cleanly below without hardcoded top offset */}
         <div
+          ref={subRegionRef}
           className="pointer-events-auto mt-1 py-1 px-2 text-xs"
           style={{
             pointerEvents: 'auto',
@@ -1420,6 +1461,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
 
       {/* Bottom Left: Windy-Style Dynamic Colorbar Legend */}
       <div
+        ref={legendRef}
         style={{
           position: 'absolute',
           bottom: '24px',
@@ -1521,62 +1563,6 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
           </div>
         )}
       </div>
-
-      {/* Selected Convective Cell Inspector Card */}
-      {selectedCell && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: '24px',
-            right: '14px',
-            zIndex: 1000,
-            backgroundColor: '#090d16',
-            border: '1px solid rgba(148, 163, 184, 0.35)',
-            borderRadius: '10px',
-            padding: '12px 14px',
-            width: '280px',
-            boxShadow: '0 12px 30px rgba(0, 0, 0, 0.75)',
-            fontSize: '11px',
-            color: '#f8fafc',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <span style={{ fontWeight: 700, fontSize: '13px', color: '#38bdf8' }}>{selectedCell.name}</span>
-            <button
-              onClick={() => onSelectCell(null)}
-              style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '14px' }}
-            >
-              ✕
-            </button>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', margin: '8px 0', borderBottom: '1px solid #334155', paddingBottom: '8px' }}>
-            <div>
-              <span style={{ color: '#94a3b8' }}>Coord:</span>
-              <div style={{ fontWeight: 600 }}>{selectedCell.lat.toFixed(2)}°N, {selectedCell.lon.toFixed(2)}°E</div>
-            </div>
-            <div>
-              <span style={{ color: '#94a3b8' }}>Radius:</span>
-              <div style={{ fontWeight: 600 }}>{selectedCell.radiusKm} km</div>
-            </div>
-            <div>
-              <span style={{ color: '#94a3b8' }}>Prob ({horizon.label}):</span>
-              <div style={{ fontWeight: 700, color: '#facc15' }}>{(selectedCell.occurrenceProb * 100).toFixed(0)}%</div>
-            </div>
-            <div>
-              <span style={{ color: '#94a3b8' }}>Flash Rate:</span>
-              <div style={{ fontWeight: 700, color: '#f43f5e' }}>{selectedCell.flashDensity} fl/km²</div>
-            </div>
-          </div>
-
-          <div style={{ fontSize: '10px', color: '#cbd5e1', lineHeight: '1.5' }}>
-            <div><strong>CAPE / CIN:</strong> {selectedCell.cape} J/kg / {selectedCell.cin} J/kg</div>
-            <div><strong>Aleatoric (data noise):</strong> ±{(selectedCell.aleatoricUncertainty * 100).toFixed(0)}%</div>
-            <div><strong>Epistemic (model uncertainty):</strong> ±{(selectedCell.epistemicUncertainty * 100).toFixed(0)}%</div>
-            <div><strong>Convective Regime:</strong> {selectedCell.growthRate.toUpperCase()}</div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
