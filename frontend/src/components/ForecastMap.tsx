@@ -438,13 +438,25 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
   // =========================================================================
   useEffect(() => {
     const canvas = windCanvasRef.current;
-    if (!canvas || !showWindParticles || !mapReady) {
+    if (!canvas || !mapReady) return;
+
+    if (!showWindParticles) {
       if (animationFrameIdRef.current) {
         cancelAnimationFrame(animationFrameIdRef.current);
         animationFrameIdRef.current = null;
       }
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      canvas.style.display = 'none';
+      canvas.style.opacity = '0';
       return;
     }
+
+    // Re-enable visibility when layer toggle is checked
+    canvas.style.display = 'block';
+    canvas.style.opacity = '1';
 
     let isRunning = true;
     let lastTime = performance.now();
