@@ -872,9 +872,9 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
                 white-space: nowrap;
                 cursor: pointer;
               ">
-                <span style="width: 5px; height: 5px; border-radius: 50%; background: ${severityColor}; display: inline-block;"></span>
-                <span>${shortName}</span>
-                <span style="color: #facc15; font-weight: 700; font-family: ui-monospace, monospace; margin-left: 2px;">${probPct}%</span>
+                <span style="width: 5px; height: 5px; border-radius: 50%; background: ${severityColor}; display: inline-block; flex-shrink: 0;"></span>
+                <span class="cell-badge-name">${shortName}</span>
+                <span class="cell-badge-prob" style="color: #facc15; font-weight: 700; font-family: ui-monospace, monospace; margin-left: 2px;">${probPct}%</span>
               </div>
             </div>
           `,

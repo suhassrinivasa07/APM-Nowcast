@@ -319,7 +319,7 @@ export const App: React.FC = () => {
           style={{
             background: 'rgba(234, 179, 8, 0.1)',
             borderBottom: '1px solid rgba(234, 179, 8, 0.25)',
-            padding: '3px 20px',
+            padding: '3px 16px',
             fontSize: '11px',
             color: '#facc15',
             display: 'flex',
@@ -327,9 +327,13 @@ export const App: React.FC = () => {
             justifyContent: 'center',
             gap: '8px',
             flexShrink: 0,
+            flexWrap: 'wrap',
           }}
         >
-          ⚠️ <strong>Simulation Mode (Synthetic Data)</strong> — not live atmospheric forecasts.
+          <span>
+            ⚠️ <strong>Simulation Mode</strong>
+            <span className="hidden-sm-down"> (Synthetic Data) — not live atmospheric forecasts.</span>
+          </span>
           <button
             onClick={() => { setIsSimulationMode(false); nowcastApi.setSimulationMode(false); loadSnapshot(); }}
             style={{ background: '#0284c7', border: 'none', borderRadius: '4px', padding: '1px 8px', color: '#fff', fontSize: '10px', fontWeight: 600, cursor: 'pointer' }}
@@ -341,14 +345,10 @@ export const App: React.FC = () => {
 
       {/* ── Compact Top Navbar ───────────────────────────────────────────── */}
       <header
+        className="app-header"
         style={{
           background: '#090d16',
           borderBottom: '1px solid #1e293b',
-          padding: '8px 16px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
           flexShrink: 0,
           position: 'sticky',
           top: 0,
@@ -646,22 +646,109 @@ export const App: React.FC = () => {
           </div>
         </aside>
 
-        {/* ── RIGHT: MAP VIEWPORT + FLOATING HORIZON DOCK (Top on mobile via order: 1) ── */}
+        {/* ── RIGHT: MAP VIEWPORT + TIMELINE DOCK (Top on mobile via order: 1) ── */}
         <div className="map-viewport-section">
-          {/* Full-bleed Map */}
-          <ForecastMap
-            cells={cells}
-            stations={snapshot?.stations || []}
-            horizon={currentHorizon}
-            overlayMode={overlayMode}
-            onOverlayModeChange={setOverlayMode}
-            selectedCell={selectedCell}
-            onSelectCell={handleSelectCell}
-            uncertaintyInflation={snapshot?.uncertaintyInflationFactor || 1.0}
-            onFlyToReady={(fn) => { flyToRef.current = fn; }}
-          />
+          {/* Map canvas container */}
+          <div className="map-canvas-container">
+            <ForecastMap
+              cells={cells}
+              stations={snapshot?.stations || []}
+              horizon={currentHorizon}
+              overlayMode={overlayMode}
+              onOverlayModeChange={setOverlayMode}
+              selectedCell={selectedCell}
+              onSelectCell={handleSelectCell}
+              uncertaintyInflation={snapshot?.uncertaintyInflationFactor || 1.0}
+              onFlyToReady={(fn) => { flyToRef.current = fn; }}
+            />
 
-          {/* ── Floating Horizon Timeline Dock ────────────────────────── */}
+            {/* ── Selected Cluster Detail Card (Rendered Outside Leaflet MapContainer) ── */}
+            {selectedCell && (
+              <div
+                ref={detailCardRef}
+                className="selected-cell-inspector pointer-events-auto"
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontWeight: 700, fontSize: '13px', color: '#38bdf8' }}>{selectedCell.name}</span>
+                  <button
+                    type="button"
+                    aria-label="Close cluster details"
+                    className="pointer-events-auto"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleSelectCell(null);
+                    }}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    style={{
+                      position: 'relative',
+                      zIndex: 1101,
+                      pointerEvents: 'auto',
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#94a3b8',
+                      cursor: 'pointer',
+                      fontSize: '16px',
+                      lineHeight: 1,
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '4px',
+                      transition: 'color 0.15s, background-color 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = '#f8fafc';
+                      e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = '#94a3b8';
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', margin: '8px 0', borderBottom: '1px solid #334155', paddingBottom: '8px' }}>
+                  <div>
+                    <span style={{ color: '#94a3b8' }}>Coord:</span>
+                    <div style={{ fontWeight: 600 }}>{selectedCell.lat.toFixed(2)}°N, {selectedCell.lon.toFixed(2)}°E</div>
+                  </div>
+                  <div>
+                    <span style={{ color: '#94a3b8' }}>Radius:</span>
+                    <div style={{ fontWeight: 600 }}>{selectedCell.radiusKm} km</div>
+                  </div>
+                  <div>
+                    <span style={{ color: '#94a3b8' }}>Prob ({currentHorizon.label}):</span>
+                    <div style={{ fontWeight: 700, color: '#facc15' }}>{(selectedCell.occurrenceProb * 100).toFixed(0)}%</div>
+                  </div>
+                  <div>
+                    <span style={{ color: '#94a3b8' }}>Flash Rate:</span>
+                    <div style={{ fontWeight: 700, color: '#f43f5e' }}>{selectedCell.flashDensity} fl/km²</div>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '10px', color: '#cbd5e1', lineHeight: '1.5' }}>
+                  <div><strong>CAPE / CIN:</strong> {selectedCell.cape} J/kg / {selectedCell.cin} J/kg</div>
+                  <div><strong>Aleatoric (data noise):</strong> ±{(selectedCell.aleatoricUncertainty * 100).toFixed(0)}%</div>
+                  <div><strong>Epistemic (model uncertainty):</strong> ±{(selectedCell.epistemicUncertainty * 100).toFixed(0)}%</div>
+                  <div><strong>Convective Regime:</strong> {selectedCell.growthRate.toUpperCase()}</div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Horizon Timeline Dock: static block below map on mobile (< lg), floating dock on desktop (lg:) ── */}
           <div className="timeline-dock-wrapper">
             <HorizonController
               currentStep={horizonStep}
@@ -671,91 +758,6 @@ export const App: React.FC = () => {
               isConvectiveActive={isConvectiveActive}
             />
           </div>
-
-          {/* ── Selected Cluster Detail Card (Rendered Outside Leaflet MapContainer) ── */}
-          {selectedCell && (
-            <div
-              ref={detailCardRef}
-              className="selected-cell-inspector pointer-events-auto"
-              onClick={(e) => e.stopPropagation()}
-              onMouseDown={(e) => e.stopPropagation()}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <span style={{ fontWeight: 700, fontSize: '13px', color: '#38bdf8' }}>{selectedCell.name}</span>
-                <button
-                  type="button"
-                  aria-label="Close cluster details"
-                  className="pointer-events-auto"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleSelectCell(null);
-                  }}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  style={{
-                    position: 'relative',
-                    zIndex: 1101,
-                    pointerEvents: 'auto',
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#94a3b8',
-                    cursor: 'pointer',
-                    fontSize: '16px',
-                    lineHeight: 1,
-                    padding: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: '4px',
-                    transition: 'color 0.15s, background-color 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = '#f8fafc';
-                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = '#94a3b8';
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', margin: '8px 0', borderBottom: '1px solid #334155', paddingBottom: '8px' }}>
-                <div>
-                  <span style={{ color: '#94a3b8' }}>Coord:</span>
-                  <div style={{ fontWeight: 600 }}>{selectedCell.lat.toFixed(2)}°N, {selectedCell.lon.toFixed(2)}°E</div>
-                </div>
-                <div>
-                  <span style={{ color: '#94a3b8' }}>Radius:</span>
-                  <div style={{ fontWeight: 600 }}>{selectedCell.radiusKm} km</div>
-                </div>
-                <div>
-                  <span style={{ color: '#94a3b8' }}>Prob ({currentHorizon.label}):</span>
-                  <div style={{ fontWeight: 700, color: '#facc15' }}>{(selectedCell.occurrenceProb * 100).toFixed(0)}%</div>
-                </div>
-                <div>
-                  <span style={{ color: '#94a3b8' }}>Flash Rate:</span>
-                  <div style={{ fontWeight: 700, color: '#f43f5e' }}>{selectedCell.flashDensity} fl/km²</div>
-                </div>
-              </div>
-
-              <div style={{ fontSize: '10px', color: '#cbd5e1', lineHeight: '1.5' }}>
-                <div><strong>CAPE / CIN:</strong> {selectedCell.cape} J/kg / {selectedCell.cin} J/kg</div>
-                <div><strong>Aleatoric (data noise):</strong> ±{(selectedCell.aleatoricUncertainty * 100).toFixed(0)}%</div>
-                <div><strong>Epistemic (model uncertainty):</strong> ±{(selectedCell.epistemicUncertainty * 100).toFixed(0)}%</div>
-                <div><strong>Convective Regime:</strong> {selectedCell.growthRate.toUpperCase()}</div>
-              </div>
-            </div>
-          )}
         </div>
       </main>
 

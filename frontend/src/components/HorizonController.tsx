@@ -50,6 +50,8 @@ export const HorizonController: React.FC<HorizonControllerProps> = ({
         display: 'flex',
         flexDirection: 'column',
         gap: 7,
+        width: '100%',
+        boxSizing: 'border-box',
       }}
     >
       {/* Top Row: Playback + Speed + Horizon Steps */}
