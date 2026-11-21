@@ -20,11 +20,18 @@ body {
   padding: 0;
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   background-color: #090d16;
   color: #f8fafc;
   overflow-x: hidden;
-  /* Lock vertical scroll at app level — layout is 100vh */
-  overflow-y: hidden;
+  /* Lock vertical scroll on desktop; allow natural scroll on mobile */
+  overflow-y: auto;
+}
+
+@media (min-width: 1024px) {
+  body {
+    overflow-y: hidden;
+  }
 }
 
 * {
@@ -260,4 +267,168 @@ body {
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.85) !important;
   border-radius: 8px !important;
   padding: 0 !important;
+}
+
+/* ==========================================================================
+   Mobile & Tablet Responsive Shell & Stacking Layout (< 1024px / < 768px)
+   ========================================================================== */
+
+.app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background-color: #090d16;
+  color: #f8fafc;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+@media (min-width: 1024px) {
+  .app-shell {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+}
+
+.main-command-layout {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: visible;
+}
+
+@media (min-width: 1024px) {
+  .main-command-layout {
+    flex-direction: row;
+    overflow: hidden;
+  }
+}
+
+/* Map Viewport: Top on mobile with comfortable 52dvh (min 340px); full flex on desktop */
+.map-viewport-section {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  width: 100%;
+  height: 52vh;
+  height: 52dvh;
+  min-height: 340px;
+  order: 1;
+}
+
+@media (min-width: 1024px) {
+  .map-viewport-section {
+    flex: 1;
+    height: 100%;
+    order: 2;
+  }
+}
+
+/* Sidebar Section: Full width below map on mobile; 360px fixed on desktop */
+.sidebar-panel-section {
+  background: #0a0f1e;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  order: 2;
+  border-top: 1px solid #1e293b;
+  flex-shrink: 0;
+}
+
+@media (min-width: 1024px) {
+  .sidebar-panel-section {
+    width: 360px;
+    min-width: 360px;
+    max-width: 360px;
+    order: 1;
+    border-top: none;
+    border-right: 1px solid #1e293b;
+    overflow: hidden;
+    height: 100%;
+  }
+}
+
+/* Floating Horizon Timeline Dock Container */
+.timeline-dock-wrapper {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;
+  pointer-events: auto;
+  width: 94%;
+  max-width: 672px; /* max-w-2xl */
+}
+
+@media (min-width: 640px) {
+  .timeline-dock-wrapper {
+    bottom: 20px;
+    width: min(640px, calc(100% - 48px));
+  }
+}
+
+/* Selected Convective Cluster Detail Inspector Card */
+.selected-cell-inspector {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1100;
+  pointer-events: auto;
+  background-color: #090d16;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.75);
+  font-size: 11px;
+  color: #f8fafc;
+  width: auto;
+}
+
+@media (min-width: 640px) {
+  .selected-cell-inspector {
+    left: auto;
+    right: 16px;
+    bottom: 24px;
+    width: 320px; /* sm:w-80 */
+    max-width: 320px;
+  }
+}
+
+/* Smooth Horizontal Scrollbars without visual scrollbar clutter */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Responsive display utilities */
+@media (max-width: 639px) {
+  .hidden-sm-down {
+    display: none !important;
+  }
+}
+
+@media (min-width: 640px) {
+  .hidden-sm-up {
+    display: none !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .hidden-md-down {
+    display: none !important;
+  }
+}
+
+@media (min-width: 768px) {
+  .hidden-md-up {
+    display: none !important;
+  }
 }

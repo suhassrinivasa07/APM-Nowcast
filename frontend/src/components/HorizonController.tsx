@@ -45,23 +45,23 @@ export const HorizonController: React.FC<HorizonControllerProps> = ({
         WebkitBackdropFilter: 'blur(14px)',
         border: '1px solid rgba(51, 65, 85, 0.75)',
         borderRadius: 12,
-        padding: '10px 14px',
+        padding: '8px 12px',
         boxShadow: '0 12px 40px rgba(0,0,0,0.65)',
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
+        gap: 7,
       }}
     >
       {/* Top Row: Playback + Speed + Horizon Steps */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
         {/* Playback controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
           <button
             onClick={() => onStepChange((currentStep === 0 ? 3 : currentStep - 1) as HorizonStep)}
             title="Previous Horizon"
-            style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '5px 8px', color: '#cbd5e1', cursor: 'pointer' }}
+            style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '4px 7px', color: '#cbd5e1', cursor: 'pointer' }}
           >
-            <SkipBack size={13} />
+            <SkipBack size={12} />
           </button>
 
           <button
@@ -69,35 +69,34 @@ export const HorizonController: React.FC<HorizonControllerProps> = ({
             title={isPlaying ? 'Pause' : 'Auto-Play Horizons'}
             style={{
               background: isPlaying ? '#ef4444' : '#0284c7',
-              border: 'none', borderRadius: 7, padding: '6px 12px',
+              border: 'none', borderRadius: 6, padding: '5px 10px',
               color: '#fff', fontWeight: 700, fontSize: '11px', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 5, transition: 'all 0.2s',
+              display: 'flex', alignItems: 'center', gap: 4, transition: 'all 0.2s',
             }}
           >
-            {isPlaying ? <Pause size={13} /> : <Play size={13} />}
+            {isPlaying ? <Pause size={12} /> : <Play size={12} />}
             {isPlaying ? 'Pause' : 'Play'}
           </button>
 
           <button
             onClick={() => onStepChange(((currentStep + 1) % 4) as HorizonStep)}
             title="Next Horizon"
-            style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '5px 8px', color: '#cbd5e1', cursor: 'pointer' }}
+            style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: '4px 7px', color: '#cbd5e1', cursor: 'pointer' }}
           >
-            <SkipForward size={13} />
+            <SkipForward size={12} />
           </button>
 
           {/* Speed pills */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: '10px', color: '#64748b' }}>
-            <span>Speed:</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: '10px', color: '#64748b', marginLeft: 2 }}>
             {[{ label: '1×', speed: 2000 }, { label: '2×', speed: 1000 }].map((sp) => (
               <button
                 key={sp.label}
                 onClick={() => setPlaybackSpeed(sp.speed)}
                 style={{
                   background: playbackSpeed === sp.speed ? '#334155' : 'transparent',
-                  border: '1px solid #475569', borderRadius: 4, padding: '1px 5px',
+                  border: '1px solid #475569', borderRadius: 4, padding: '1px 4px',
                   color: playbackSpeed === sp.speed ? '#38bdf8' : '#64748b',
-                  fontSize: '10px', cursor: 'pointer',
+                  fontSize: '9px', cursor: 'pointer',
                 }}
               >
                 {sp.label}
@@ -107,7 +106,7 @@ export const HorizonController: React.FC<HorizonControllerProps> = ({
         </div>
 
         {/* Horizon step buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <div className="no-scrollbar" style={{ display: 'flex', alignItems: 'center', gap: 4, overflowX: 'auto', maxWidth: '100%' }}>
           {([0, 1, 2, 3] as HorizonStep[]).map((step) => {
             const h = HORIZON_DEFINITIONS[step];
             const isSelected = currentStep === step;
@@ -118,11 +117,12 @@ export const HorizonController: React.FC<HorizonControllerProps> = ({
                 style={{
                   background: isSelected ? 'linear-gradient(135deg,#0284c7,#2563eb)' : '#1e293b',
                   border: isSelected ? '1px solid #38bdf8' : '1px solid #334155',
-                  borderRadius: 7, padding: '5px 10px',
+                  borderRadius: 6, padding: '4px 8px',
                   color: isSelected ? '#fff' : '#64748b',
                   fontWeight: isSelected ? 700 : 500, fontSize: '11px', cursor: 'pointer',
                   boxShadow: isSelected ? '0 0 10px rgba(56,189,248,0.4)' : 'none',
                   transition: 'all 0.15s',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {h.label}

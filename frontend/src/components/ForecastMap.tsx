@@ -93,6 +93,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
   // Floating HUD overlay refs for Leaflet click & scroll isolation
   const modeSwitcherRef = useRef<HTMLDivElement>(null);
   const layerControlsRef = useRef<HTMLDivElement>(null);
+  const mobileLayersRef = useRef<HTMLDivElement>(null);
   const subRegionRef = useRef<HTMLDivElement>(null);
   const legendRef = useRef<HTMLDivElement>(null);
 
@@ -100,6 +101,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
     const overlays = [
       modeSwitcherRef.current,
       layerControlsRef.current,
+      mobileLayersRef.current,
       subRegionRef.current,
       legendRef.current,
     ];
@@ -125,6 +127,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
   const [showStations, setShowStations] = useState<boolean>(true);
   const [showRangeRings, setShowRangeRings] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
+  const [mobileLayersOpen, setMobileLayersOpen] = useState<boolean>(false);
   const [activeRegionPreset, setActiveRegionPreset] = useState<string>('all_india');
   const [mapReady, setMapReady] = useState<boolean>(false);
 
@@ -708,6 +711,13 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
     renderHeatmap();
     setMapReady(true);
 
+    const handleMapResize = () => {
+      if (!mapInstanceRef.current) return;
+      mapInstanceRef.current.invalidateSize({ debounceMoveend: true });
+      syncCanvasSizeAndPosition();
+      renderHeatmap();
+    };
+
     map.on('move', () => {
       syncCanvasSizeAndPosition();
       renderHeatmap();
@@ -717,8 +727,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
       renderHeatmap();
     });
     map.on('resize', () => {
-      syncCanvasSizeAndPosition();
-      renderHeatmap();
+      handleMapResize();
     });
     map.on('viewreset', () => {
       syncCanvasSizeAndPosition();
@@ -727,16 +736,25 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
     // ResizeObserver for zero-delay response to container resizing
     const ro = new ResizeObserver(() => {
-      syncCanvasSizeAndPosition();
-      renderHeatmap();
+      handleMapResize();
     });
     if (mapContainerRef.current) {
       ro.observe(mapContainerRef.current);
     }
 
+    window.addEventListener('resize', handleMapResize);
+    window.addEventListener('orientationchange', handleMapResize);
+
+    const initialResizeTimer = setTimeout(() => {
+      handleMapResize();
+    }, 150);
+
     return () => {
+      clearTimeout(initialResizeTimer);
       setMapReady(false);
       ro.disconnect();
+      window.removeEventListener('resize', handleMapResize);
+      window.removeEventListener('orientationchange', handleMapResize);
       map.off('move');
       map.off('zoom');
       map.off('resize');
@@ -1164,37 +1182,36 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
         />
       </div>
 
-      {/* Unified Top Controls Overlay: Never overlaps, wraps cleanly on narrower viewports */}
+      {/* Unified Top Controls Overlay: Responsive on mobile (< md), compact and never overlaps */}
       <div
-        className="absolute top-3 left-3 right-3 z-[1000] flex flex-col gap-2 pointer-events-none"
+        className="absolute top-2 sm:top-3 left-2 sm:left-3 right-2 sm:right-3 z-[1000] flex flex-col gap-1.5 sm:gap-2 pointer-events-none"
         style={{
           position: 'absolute',
-          top: '12px',
-          left: '12px',
-          right: '12px',
+          top: '10px',
+          left: '10px',
+          right: '10px',
           zIndex: 1000,
           pointerEvents: 'none',
           display: 'flex',
           flexDirection: 'column',
-          gap: '8px',
+          gap: '6px',
         }}
       >
-        {/* Row 1: Mode Switcher (Left) + Layer Toggle Bar (Right) */}
+        {/* Row 1: Mode Switcher (Left) + Layers Toggle (< md) / Layer Bar (>= md) */}
         <div
-          className="flex flex-wrap items-center justify-between gap-2 w-full"
           style={{
             display: 'flex',
             flexWrap: 'wrap',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: '8px',
+            gap: '6px',
             width: '100%',
           }}
         >
           {/* Mode Switcher Pill */}
           <div
             ref={modeSwitcherRef}
-            className="pointer-events-auto py-1 px-2 text-xs"
+            className="no-scrollbar"
             style={{
               pointerEvents: 'auto',
               background: 'rgba(15, 23, 42, 0.92)',
@@ -1202,85 +1219,112 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
               WebkitBackdropFilter: 'blur(10px)',
               border: '1px solid rgba(51, 65, 85, 0.9)',
               borderRadius: '8px',
-              padding: '4px 6px',
+              padding: '3px 4px',
               display: 'flex',
-              flexWrap: 'wrap',
+              flexWrap: 'nowrap',
+              overflowX: 'auto',
               alignItems: 'center',
-              gap: '6px',
+              gap: '4px',
               boxShadow: '0 8px 24px rgba(0, 0, 0, 0.55)',
             }}
           >
             <button
               onClick={() => onOverlayModeChange('probability')}
-              className="py-1 px-2 text-xs"
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
-                padding: '4px 8px',
-                fontSize: '12px',
+                gap: '5px',
+                padding: '4px 7px',
+                fontSize: '11px',
                 fontWeight: 600,
                 borderRadius: '6px',
                 border: 'none',
                 cursor: 'pointer',
+                whiteSpace: 'nowrap',
                 transition: 'all 0.2s',
                 background: overlayMode === 'probability' ? '#0284c7' : 'transparent',
                 color: overlayMode === 'probability' ? '#ffffff' : '#94a3b8',
               }}
             >
-              <Activity size={14} />
-              Lightning Prob (%)
+              <Activity size={13} />
+              Prob (%)
             </button>
 
             <button
               onClick={() => onOverlayModeChange('flash_density')}
-              className="py-1 px-2 text-xs"
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
-                padding: '4px 8px',
-                fontSize: '12px',
+                gap: '5px',
+                padding: '4px 7px',
+                fontSize: '11px',
                 fontWeight: 600,
                 borderRadius: '6px',
                 border: 'none',
                 cursor: 'pointer',
+                whiteSpace: 'nowrap',
                 transition: 'all 0.2s',
                 background: overlayMode === 'flash_density' ? '#7c3aed' : 'transparent',
                 color: overlayMode === 'flash_density' ? '#ffffff' : '#94a3b8',
               }}
             >
-              <Zap size={14} />
-              Flash Density (fl/km²)
+              <Zap size={13} />
+              Flash Density
             </button>
 
             <button
               onClick={() => onOverlayModeChange('uncertainty')}
-              className="py-1 px-2 text-xs"
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
-                padding: '4px 8px',
-                fontSize: '12px',
+                gap: '5px',
+                padding: '4px 7px',
+                fontSize: '11px',
                 fontWeight: 600,
                 borderRadius: '6px',
                 border: 'none',
                 cursor: 'pointer',
+                whiteSpace: 'nowrap',
                 transition: 'all 0.2s',
                 background: overlayMode === 'uncertainty' ? '#db2777' : 'transparent',
                 color: overlayMode === 'uncertainty' ? '#ffffff' : '#94a3b8',
               }}
             >
-              <AlertTriangle size={14} />
-              Uncertainty Bounds
+              <AlertTriangle size={13} />
+              Uncertainty
             </button>
           </div>
 
-          {/* Layer Toggle Bar Pill */}
+          {/* Mobile Layers Toggle Button (< md) */}
+          <button
+            type="button"
+            className="hidden-md-up"
+            onClick={() => setMobileLayersOpen(!mobileLayersOpen)}
+            style={{
+              pointerEvents: 'auto',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '5px 10px',
+              fontSize: '11px',
+              fontWeight: 600,
+              borderRadius: '8px',
+              background: mobileLayersOpen ? '#0284c7' : 'rgba(15, 23, 42, 0.92)',
+              border: mobileLayersOpen ? '1px solid #38bdf8' : '1px solid rgba(51, 65, 85, 0.9)',
+              color: '#ffffff',
+              cursor: 'pointer',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.55)',
+            }}
+          >
+            <Layers size={13} color={mobileLayersOpen ? '#fff' : '#38bdf8'} />
+            Layers
+            <span style={{ fontSize: '9px', opacity: 0.8 }}>{mobileLayersOpen ? '▲' : '▼'}</span>
+          </button>
+
+          {/* Desktop Layer Toggle Bar (>= md) */}
           <div
             ref={layerControlsRef}
-            className="pointer-events-auto py-1 px-2 text-xs"
+            className="hidden-md-down no-scrollbar"
             style={{
               pointerEvents: 'auto',
               background: 'rgba(15, 23, 42, 0.92)',
@@ -1290,7 +1334,8 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
               borderRadius: '8px',
               padding: '4px 8px',
               display: 'flex',
-              flexWrap: 'wrap',
+              flexWrap: 'nowrap',
+              overflowX: 'auto',
               alignItems: 'center',
               gap: '10px',
               fontSize: '12px',
@@ -1302,7 +1347,6 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
             <button
               onClick={() => setIs3DMode(!is3DMode)}
               title="Toggle 3D Perspective Tilt"
-              className="py-1 px-2 text-xs"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1315,6 +1359,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
                 cursor: 'pointer',
                 fontSize: '12px',
                 fontWeight: 600,
+                whiteSpace: 'nowrap',
                 transition: 'all 0.2s',
               }}
             >
@@ -1323,7 +1368,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
             </button>
 
             {/* Wind Particles Streamlines Toggle */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
               <input
                 type="checkbox"
                 checked={showWindParticles}
@@ -1334,7 +1379,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
             </label>
 
             {/* Organic Convective Heatmap Toggle */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
               <input
                 type="checkbox"
                 checked={showPlumes}
@@ -1345,7 +1390,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
             </label>
 
             {/* Motion Vectors Toggle */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
               <input
                 type="checkbox"
                 checked={showTrajectories}
@@ -1356,7 +1401,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
             </label>
 
             {/* Stations Toggle */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
               <input
                 type="checkbox"
                 checked={showStations}
@@ -1367,7 +1412,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
             </label>
 
             {/* DWR 250km Range Rings */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
               <input
                 type="checkbox"
                 checked={showRangeRings}
@@ -1378,7 +1423,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
             </label>
 
             {/* Floating Labels Toggle */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
               <input
                 type="checkbox"
                 checked={showLabels}
@@ -1392,7 +1437,6 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
             <button
               onClick={resetView}
               title="Reset to Pan-India Overview (22.5°N, 79.0°E, Zoom 5)"
-              className="py-1 px-2 text-xs"
               style={{
                 background: '#1e293b',
                 border: '1px solid #475569',
@@ -1404,6 +1448,7 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
                 alignItems: 'center',
                 gap: '4px',
                 fontSize: '12px',
+                whiteSpace: 'nowrap',
                 transition: 'background 0.2s',
               }}
             >
@@ -1412,6 +1457,145 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
             </button>
           </div>
         </div>
+
+        {/* Mobile Collapsible Layer Toggle Bar (< md, when mobileLayersOpen is true) */}
+        {mobileLayersOpen && (
+          <div
+            ref={mobileLayersRef}
+            className="hidden-md-up no-scrollbar"
+            style={{
+              pointerEvents: 'auto',
+              background: 'rgba(15, 23, 42, 0.94)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              border: '1px solid rgba(56, 189, 248, 0.4)',
+              borderRadius: '8px',
+              padding: '6px 8px',
+              display: 'flex',
+              flexWrap: 'nowrap',
+              overflowX: 'auto',
+              alignItems: 'center',
+              gap: '10px',
+              fontSize: '11px',
+              color: '#cbd5e1',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.7)',
+              width: '100%',
+            }}
+          >
+            {/* 3D Viewport Tilt Toggle */}
+            <button
+              onClick={() => setIs3DMode(!is3DMode)}
+              title="Toggle 3D Perspective Tilt"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: is3DMode ? '#0284c7' : '#1e293b',
+                border: '1px solid ' + (is3DMode ? '#38bdf8' : '#475569'),
+                borderRadius: '4px',
+                padding: '3px 7px',
+                color: '#f8fafc',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+                transition: 'all 0.2s',
+              }}
+            >
+              <Box size={12} color={is3DMode ? '#ffffff' : '#38bdf8'} />
+              3D Tilt
+            </button>
+
+            {/* Wind Particles Streamlines Toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <input
+                type="checkbox"
+                checked={showWindParticles}
+                onChange={(e) => setShowWindParticles(e.target.checked)}
+                style={{ accentColor: '#38bdf8' }}
+              />
+              <Wind size={12} color="#38bdf8" /> Wind Particles
+            </label>
+
+            {/* Organic Convective Heatmap Toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <input
+                type="checkbox"
+                checked={showPlumes}
+                onChange={(e) => setShowPlumes(e.target.checked)}
+                style={{ accentColor: '#38bdf8' }}
+              />
+              <Sparkles size={12} color="#38bdf8" /> Heatmap
+            </label>
+
+            {/* Motion Vectors Toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <input
+                type="checkbox"
+                checked={showTrajectories}
+                onChange={(e) => setShowTrajectories(e.target.checked)}
+                style={{ accentColor: '#facc15' }}
+              />
+              <TrendingUp size={12} color="#facc15" /> Motion Vectors
+            </label>
+
+            {/* Stations Toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <input
+                type="checkbox"
+                checked={showStations}
+                onChange={(e) => setShowStations(e.target.checked)}
+                style={{ accentColor: '#38bdf8' }}
+              />
+              <Radio size={12} color="#38bdf8" /> Stations
+            </label>
+
+            {/* DWR 250km Range Rings */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <input
+                type="checkbox"
+                checked={showRangeRings}
+                onChange={(e) => setShowRangeRings(e.target.checked)}
+                style={{ accentColor: '#38bdf8' }}
+              />
+              <Layers size={12} color="#38bdf8" /> DWR 250km
+            </label>
+
+            {/* Floating Labels Toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              <input
+                type="checkbox"
+                checked={showLabels}
+                onChange={(e) => setShowLabels(e.target.checked)}
+                style={{ accentColor: '#facc15' }}
+              />
+              <Eye size={12} color="#facc15" /> Labels
+            </label>
+
+            {/* Reset Map Button */}
+            <button
+              onClick={resetView}
+              title="Reset to Pan-India Overview (22.5°N, 79.0°E, Zoom 5)"
+              style={{
+                background: '#1e293b',
+                border: '1px solid #475569',
+                borderRadius: '4px',
+                padding: '3px 8px',
+                color: '#f8fafc',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '11px',
+                whiteSpace: 'nowrap',
+                transition: 'background 0.2s',
+              }}
+            >
+              <Compass size={12} />
+              Reset
+            </button>
+          </div>
+        )}
 
         {/* Row 2: Sub-Region Selector cleanly below without hardcoded top offset */}
         <div

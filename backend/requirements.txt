@@ -42,8 +42,9 @@ scipy==1.18.1
 setuptools==84.2.1
 starlette==1.10.0
 sympy==1.14.0
-torch @ file:///C:/Users/Suhas%20S/OneDrive/Desktop/weather/APM-Nowcast/backend/torch-2.14.1%2Bcu126-cp313-cp313-win_amd64.whl#sha256=92d0ae66f10ae9dfaaf85d684d6794a3d6ca4ed938dcfaa25e94c54cff3764eb
-torchvision==0.29.1+cu126
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2.0
+torchvision>=0.17.0
 typing-inspection==0.4.5
 typing_extensions==4.16.0
 tzdata==2026.6

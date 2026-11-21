@@ -174,10 +174,16 @@ export const App: React.FC = () => {
         }
       }
     } catch (err: any) {
-      setApiError(
-        err?.message ||
-          `Unable to connect to live APM-Nowcast FastAPI server (${API_BASE_URL}). Ensure backend is running or switch to Simulation Mode.`
-      );
+      console.warn('Live API unreachable or timed out, auto-triggering Simulation Mode:', err);
+      // Auto-trigger simulation mode gracefully without blocking screen
+      setIsSimulationMode(true);
+      nowcastApi.setSimulationMode(true);
+      const fallbackData = nowcastApi.getSyntheticSnapshot(horizonStep, activeSensors);
+      setSnapshot(fallbackData);
+      if (selectedCellRef.current) {
+        const updated = fallbackData.cells.find((c) => c.name === selectedCellRef.current?.name);
+        setSelectedCell(updated || null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -265,20 +271,8 @@ export const App: React.FC = () => {
     convectiveRegime: 'High-CAPE / Weak-CIN Tropical Maritime Convection',
   };
 
-  // ─── Sidebar panel widths ────────────────────────────────────────────────
-  const SIDEBAR_W = 340;
-
   return (
-    <div
-      style={{
-        height: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        backgroundColor: '#090d16',
-        color: '#f8fafc',
-        overflow: 'hidden',
-      }}
-    >
+    <div className="app-shell">
       {/* ── Slim Research Prototype Disclaimer Banner ────────────────────── */}
       <div
         role="alert"
@@ -286,7 +280,7 @@ export const App: React.FC = () => {
         style={{
           background: '#0a0f1e',
           borderBottom: '1px solid #1e293b',
-          padding: '4px 20px',
+          padding: '4px 16px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -294,6 +288,7 @@ export const App: React.FC = () => {
           fontSize: '10px',
           color: '#64748b',
           flexShrink: 0,
+          flexWrap: 'wrap',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -303,7 +298,7 @@ export const App: React.FC = () => {
           </span>
         </div>
         {/* Hardware telemetry relocated from Navbar to here */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '10px', color: '#475569' }}>
+        <div className="hidden-sm-down" style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '10px', color: '#475569' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Cpu size={11} color="#a855f7" /> RTX 3050 (4GB FP16)
           </span>
@@ -349,7 +344,7 @@ export const App: React.FC = () => {
         style={{
           background: '#090d16',
           borderBottom: '1px solid #1e293b',
-          padding: '8px 20px',
+          padding: '8px 16px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -361,23 +356,25 @@ export const App: React.FC = () => {
         }}
       >
         {/* Logo + Title */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg,#0284c7,#7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 14px rgba(56,189,248,0.4)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+          <div style={{ width: 34, height: 34, minWidth: 34, borderRadius: 9, background: 'linear-gradient(135deg,#0284c7,#7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 14px rgba(56,189,248,0.4)' }}>
             <CloudLightning size={20} color="#fff" />
           </div>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h1 style={{ margin: 0, fontSize: '16px', fontWeight: 800, letterSpacing: '-0.02em', color: '#f8fafc' }}>APM-Nowcast</h1>
-              <span style={{ fontSize: '9px', fontWeight: 700, color: '#facc15', background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)', padding: '1px 5px', borderRadius: 4 }}>
+              <h1 style={{ margin: 0, fontSize: '16px', fontWeight: 800, letterSpacing: '-0.02em', color: '#f8fafc', whiteSpace: 'nowrap' }}>APM-Nowcast</h1>
+              <span className="hidden-sm-down" style={{ fontSize: '9px', fontWeight: 700, color: '#facc15', background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)', padding: '1px 5px', borderRadius: 4, whiteSpace: 'nowrap' }}>
                 RESEARCH PROTOTYPE
               </span>
             </div>
-            <p style={{ margin: 0, fontSize: '10px', color: '#64748b' }}>Adaptive Multimodal Thunderstorm & Lightning Nowcasting • India Domain</p>
+            <p className="hidden-sm-down" style={{ margin: 0, fontSize: '10px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              Adaptive Multimodal Thunderstorm & Lightning Nowcasting • India Domain
+            </p>
           </div>
         </div>
 
         {/* Live Status Indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#94a3b8' }}>
             <div style={{ width: 7, height: 7, borderRadius: '50%', background: isBackendOnline ? '#34d399' : '#eab308', boxShadow: isBackendOnline ? '0 0 6px #34d399' : 'none', animation: isBackendOnline ? 'pulse-dot 2s infinite' : 'none' }} />
             <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#f1f5f9', fontSize: '11px' }}>
@@ -411,29 +408,10 @@ export const App: React.FC = () => {
         </div>
       </header>
 
-      {/* ── Main Command Layout (100vh - banners - navbar) ───────────────── */}
-      <main
-        style={{
-          flex: 1,
-          display: 'flex',
-          overflow: 'hidden',
-          minHeight: 0,
-        }}
-      >
-        {/* ── LEFT SIDEBAR ─────────────────────────────────────────────── */}
-        <aside
-          style={{
-            width: SIDEBAR_W,
-            minWidth: SIDEBAR_W,
-            maxWidth: SIDEBAR_W,
-            background: '#0a0f1e',
-            borderRight: '1px solid #1e293b',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            flexShrink: 0,
-          }}
-        >
+      {/* ── Main Command Layout ─────────────────────────────────────────── */}
+      <main className="main-command-layout">
+        {/* ── LEFT SIDEBAR (Placed below map on mobile via order: 2) ───────── */}
+        <aside className="sidebar-panel-section">
           {/* Segmented tab switcher */}
           <div style={{ padding: '10px 12px 0', flexShrink: 0 }}>
             <div style={{ display: 'flex', background: '#090d16', borderRadius: 8, padding: 3, border: '1px solid #1e293b', gap: 2 }}>
@@ -668,8 +646,8 @@ export const App: React.FC = () => {
           </div>
         </aside>
 
-        {/* ── RIGHT: MAP VIEWPORT + FLOATING HORIZON DOCK ─────────────── */}
-        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', minWidth: 0 }}>
+        {/* ── RIGHT: MAP VIEWPORT + FLOATING HORIZON DOCK (Top on mobile via order: 1) ── */}
+        <div className="map-viewport-section">
           {/* Full-bleed Map */}
           <ForecastMap
             cells={cells}
@@ -684,17 +662,7 @@ export const App: React.FC = () => {
           />
 
           {/* ── Floating Horizon Timeline Dock ────────────────────────── */}
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 20,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              zIndex: 900,
-              pointerEvents: 'auto',
-              width: 'min(640px, calc(100% - 48px))',
-            }}
-          >
+          <div className="timeline-dock-wrapper">
             <HorizonController
               currentStep={horizonStep}
               onStepChange={setHorizonStep}
@@ -709,21 +677,6 @@ export const App: React.FC = () => {
             <div
               ref={detailCardRef}
               className="selected-cell-inspector pointer-events-auto"
-              style={{
-                position: 'absolute',
-                bottom: '24px',
-                right: '14px',
-                zIndex: 1100,
-                pointerEvents: 'auto',
-                backgroundColor: '#090d16',
-                border: '1px solid rgba(148, 163, 184, 0.35)',
-                borderRadius: '10px',
-                padding: '12px 14px',
-                width: '280px',
-                boxShadow: '0 12px 30px rgba(0, 0, 0, 0.75)',
-                fontSize: '11px',
-                color: '#f8fafc',
-              }}
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             >

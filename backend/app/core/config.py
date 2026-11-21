@@ -13,13 +13,20 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # CORS
-    ALLOWED_ORIGINS: Union[str, List[str]] = "http://localhost:5173,http://127.0.0.1:5173"
+    ALLOWED_ORIGINS: Union[str, List[str]] = (
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://apm-nowcast.vercel.app,*"
+    )
 
     @property
     def cors_origins(self) -> List[str]:
         if isinstance(self.ALLOWED_ORIGINS, list):
-            return self.ALLOWED_ORIGINS
-        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+            origins = list(self.ALLOWED_ORIGINS)
+        else:
+            origins = [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+        for req in ["https://apm-nowcast.vercel.app", "*"]:
+            if req not in origins:
+                origins.append(req)
+        return origins
 
     # Hardware & ML configuration (Prepared for Day 2+)
     DEVICE: str = "cuda"

@@ -20,7 +20,8 @@ import {
   ThermodynamicState,
 } from '../types/nowcast';
 
-export const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
+const RAW_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+export const API_BASE = RAW_BASE.replace(/\/+$/, '');
 export const API_BASE_URL = API_BASE;
 
 /**
@@ -780,15 +781,25 @@ export class NowcastApiService {
       .join('&');
     const url = `${API_BASE_URL}/nowcast/snapshot?horizon=${horizonStep}&${sensorQuery}`;
 
-    const response = await fetch(url, {
-      headers: { Accept: 'application/json' },
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
 
-    if (!response.ok) {
-      throw new Error(`Nowcast API error: ${response.status} ${response.statusText}`);
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`Nowcast API error: ${response.status} ${response.statusText}`);
+      }
+
+      return await response.json();
+    } catch (err) {
+      clearTimeout(timeoutId);
+      throw err;
     }
-
-    return await response.json();
   }
 
   /**
@@ -799,13 +810,19 @@ export class NowcastApiService {
       return BENCHMARK_VERIFICATION_DATA;
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
     try {
       const response = await fetch(`${API_BASE_URL}/verification/benchmarks`, {
         headers: { Accept: 'application/json' },
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       if (!response.ok) throw new Error('Failed to fetch benchmarks');
       return await response.json();
     } catch {
+      clearTimeout(timeoutId);
       return BENCHMARK_VERIFICATION_DATA;
     }
   }
