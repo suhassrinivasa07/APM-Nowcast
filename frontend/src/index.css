@@ -498,3 +498,28 @@ body {
     padding: 8px 20px !important;
   }
 }
+
+/* Minimal Leaflet Attribution Bar on mobile */
+.leaflet-control-attribution {
+  background: rgba(15, 23, 42, 0.75) !important;
+  color: #94a3b8 !important;
+}
+
+.leaflet-control-attribution a {
+  color: #38bdf8 !important;
+}
+
+@media (max-width: 767px) {
+  .leaflet-control-attribution {
+    font-size: 9px !important;
+    max-width: 65% !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    background: rgba(15, 23, 42, 0.75) !important;
+    color: #94a3b8 !important;
+    border-radius: 4px !important;
+    margin: 4px !important;
+    padding: 1px 6px !important;
+  }
+}
