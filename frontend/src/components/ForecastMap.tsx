@@ -447,8 +447,9 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
     }
 
     let isRunning = true;
+    let lastTime = performance.now();
 
-    const animateWind = () => {
+    const animateWind = (now?: number) => {
       if (!isRunning || !canvas || !mapInstanceRef.current) return;
 
       const mapInstance = mapInstanceRef.current;
@@ -461,9 +462,20 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
       const width = canvas.width / dpr;
       const height = canvas.height / dpr;
 
+      // Frame-rate-independent deltaTime normalized against 60fps (~16.67ms)
+      const currentTime = typeof now === 'number' && now > 0 ? now : performance.now();
+      const dt = Math.min((currentTime - lastTime) / 1000, 0.05);
+      lastTime = currentTime;
+      const dtFactor = dt / (1 / 60);
+
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
+
+      // Smooth particle trail fade using destination-out to preserve map tile transparency
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = 'rgba(9, 13, 22, 0.14)';
+      ctx.fillRect(0, 0, width, height);
+      ctx.globalCompositeOperation = 'source-over';
 
       const bounds = mapInstance.getBounds();
       const southWest = bounds.getSouthWest();
@@ -497,8 +509,9 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
       };
 
       const eps = 0.04;
-      const speedScale = 0.20;
-      const minSpeedFloor = 0.024;
+      // Realistic synoptic wind streamline speed: reduced by ~65% for calm, smooth gliding
+      const speedScale = 0.20 * 0.35;
+      const minSpeedFloor = 0.024 * 0.35;
 
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i];
@@ -520,12 +533,12 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
           v *= boost;
         }
 
-        // Advance particle position
+        // Advance particle position scaled by dtFactor for frame-rate independence
         p.prevLat = p.lat;
         p.prevLon = p.lon;
-        p.lon += u * p.speedMultiplier;
-        p.lat += v * p.speedMultiplier;
-        p.age++;
+        p.lon += u * p.speedMultiplier * dtFactor;
+        p.lat += v * p.speedMultiplier * dtFactor;
+        p.age += dtFactor;
 
         // Random respawn across full viewport bounds so density stays completely uniform
         if (
@@ -553,7 +566,7 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
 
         // Angle and streak length: 10–14px
         const screenSpeed = Math.sqrt(u * u + v * v) * 95;
-        const streakLen = Math.min(14, Math.max(10, screenSpeed * 5.2 * p.speedMultiplier));
+        const streakLen = Math.min(14, Math.max(10, screenSpeed * 14.8 * p.speedMultiplier));
         const angle = Math.atan2(-v, u);
 
         const startX = pt1.x - Math.cos(angle) * streakLen;
@@ -1731,44 +1744,47 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
         className="hidden-md-down desktop-legend-overlay"
         style={{
           position: 'absolute',
-          bottom: '144px',
+          bottom: '16px',
           left: '16px',
+          width: '270px',
           zIndex: 1000,
-          background: 'rgba(15, 23, 42, 0.94)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-          border: '1px solid rgba(51, 65, 85, 0.9)',
-          borderRadius: '8px',
-          padding: '10px 14px',
-          minWidth: '280px',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6)',
+          background: 'rgba(9, 13, 22, 0.92)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid rgba(51, 65, 85, 0.85)',
+          borderRadius: '10px',
+          padding: '8px 12px',
+          boxShadow: '0 12px 30px rgba(0, 0, 0, 0.65)',
           fontSize: '11px',
+          boxSizing: 'border-box',
         }}
       >
-        <div style={{ fontWeight: 600, color: '#e2e8f0', marginBottom: '6px', display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-          <span>
+        <div style={{ fontWeight: 600, color: '#e2e8f0', marginBottom: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '11px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {overlayMode === 'probability' && 'Occurrence Probability'}
-            {overlayMode === 'flash_density' && 'Flash Density (fl/km²/15m)'}
-            {overlayMode === 'uncertainty' && 'Total Predictive Uncertainty'}
+            {overlayMode === 'flash_density' && 'Flash Density'}
+            {overlayMode === 'uncertainty' && 'Total Uncertainty'}
           </span>
-          <span style={{ color: '#38bdf8', fontWeight: 700 }}>{horizon.label}</span>
+          <span style={{ color: '#38bdf8', fontWeight: 700, fontSize: '10px', background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '4px', padding: '1px 5px', whiteSpace: 'nowrap' }}>
+            {horizon.label}
+          </span>
         </div>
 
         {overlayMode === 'probability' && (
           <div>
             <div
               style={{
-                height: '8px',
-                borderRadius: '4px',
+                height: '6px',
+                borderRadius: '3px',
                 background:
                   'linear-gradient(to right, #1b6b88, #3b4ca8, #7e3af2, #be185d)',
               }}
             />
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', color: '#94a3b8', marginTop: '4px', fontSize: '10px', whiteSpace: 'nowrap' }}>
-              <span>Ambient Ocean</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', marginTop: '3px', fontSize: '9.5px', whiteSpace: 'nowrap' }}>
+              <span>Ambient</span>
               <span>Moderate</span>
               <span>Convective</span>
-              <span>Severe Core</span>
+              <span>Severe</span>
             </div>
           </div>
         )}
@@ -1777,13 +1793,13 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
           <div>
             <div
               style={{
-                height: '8px',
-                borderRadius: '4px',
+                height: '6px',
+                borderRadius: '3px',
                 background:
                   'linear-gradient(to right, #1b6b88, #3b4ca8, #7e3af2, #be185d)',
               }}
             />
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', color: '#94a3b8', marginTop: '4px', fontSize: '10px', whiteSpace: 'nowrap' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', marginTop: '3px', fontSize: '9.5px', whiteSpace: 'nowrap' }}>
               <span>0</span>
               <span>8</span>
               <span>18</span>
@@ -1796,37 +1812,38 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
           <div>
             <div
               style={{
-                height: '8px',
-                borderRadius: '4px',
+                height: '6px',
+                borderRadius: '3px',
                 background: 'linear-gradient(to right, #3b4ca8, #1b6b88, #d97706, #be185d)',
               }}
             />
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', color: '#94a3b8', marginTop: '4px', fontSize: '10px', whiteSpace: 'nowrap' }}>
-              <span>Low (±15%)</span>
-              <span>Mod (±45%)</span>
-              <span>Elevated (±70%)</span>
-              <span>High (±90%+)</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', marginTop: '3px', fontSize: '9.5px', whiteSpace: 'nowrap' }}>
+              <span>Low</span>
+              <span>Mod</span>
+              <span>Elevated</span>
+              <span>High</span>
             </div>
             {uncertaintyInflation > 1.2 && (
-              <div style={{ marginTop: '6px', color: '#f43f5e', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <AlertTriangle size={12} />
-                <span>Sensors missing: Epistemic variance inflated {uncertaintyInflation}x</span>
+              <div style={{ marginTop: '4px', color: '#f43f5e', fontSize: '9px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <AlertTriangle size={11} />
+                <span>Sensors missing: Epistemic {uncertaintyInflation}x</span>
               </div>
             )}
           </div>
         )}
 
-        {showWindParticles && (
-          <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #334155', color: '#38bdf8', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <Wind size={12} color="#38bdf8" />
-            <span>1,400 Wind Streamline Wisps Active</span>
-          </div>
-        )}
-
-        {showTrajectories && (
-          <div style={{ marginTop: '4px', color: '#facc15', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <TrendingUp size={12} color="#facc15" />
-            <span>Extrapolated Storm Vectors (T+0 → +60m)</span>
+        {(showWindParticles || showTrajectories) && (
+          <div style={{ marginTop: '5px', paddingTop: '4px', borderTop: '1px solid rgba(51, 65, 85, 0.7)', fontSize: '9px', color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
+            {showWindParticles && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '3px', color: '#38bdf8' }}>
+                <Wind size={10} color="#38bdf8" /> 1,400 Wisps
+              </span>
+            )}
+            {showTrajectories && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '3px', color: '#facc15' }}>
+                <TrendingUp size={10} color="#facc15" /> Vectors +60m
+              </span>
+            )}
           </div>
         )}
       </div>
