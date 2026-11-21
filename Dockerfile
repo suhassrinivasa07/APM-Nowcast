@@ -5,8 +5,7 @@ WORKDIR /app
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY common ./common
-COPY backend ./backend
+COPY . .
 
 ENV PYTHONPATH=/app:/app/backend
 
