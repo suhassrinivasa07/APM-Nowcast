@@ -632,9 +632,15 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
     windPane.style.zIndex = '420';
     windPane.style.pointerEvents = 'none';
 
+    const stationsPane = map.createPane('stationsPane');
+    stationsPane.style.zIndex = '500';
+
     const labelsPane = map.createPane('labelsPane');
     labelsPane.style.zIndex = '520';
     labelsPane.style.pointerEvents = 'none';
+
+    const clusterBadgesPane = map.createPane('clusterBadgesPane');
+    clusterBadgesPane.style.zIndex = '650';
 
     // Set Leaflet's built-in panes z-index order: markerPane 600, tooltipPane 900, popupPane 950
     map.getPane('markerPane')!.style.zIndex = '600';
@@ -885,7 +891,11 @@ export const ForecastMap: React.FC<ForecastMapProps> = ({
           iconAnchor: [48, 11],
         });
 
-        const badgeMarker = L.marker([cell.lat, cell.lon], { icon: badgeIcon });
+        const badgeMarker = L.marker([cell.lat, cell.lon], {
+          icon: badgeIcon,
+          pane: 'clusterBadgesPane',
+          zIndexOffset: 1000,
+        });
         badgeMarker.on('click', () => onSelectCell(cell));
         badgeMarker.bindTooltip(popupContent, { sticky: true, opacity: 1.0 });
         badgeMarker.addTo(layer);
@@ -1099,7 +1109,11 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
           iconAnchor: [11, 11],
         });
 
-        const marker = L.marker([st.lat, st.lon], { icon: markerIcon });
+        const marker = L.marker([st.lat, st.lon], {
+          icon: markerIcon,
+          pane: 'stationsPane',
+          zIndexOffset: 500,
+        });
         marker.bindTooltip(
           `
             <div style="font-family: ui-sans-serif, system-ui; font-size: 11px; padding: 6px 8px; background-color: #090d16; color: #f8fafc; border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 6px;">
@@ -1714,11 +1728,11 @@ const IMD_DWR_DEFAULT_STATIONS: SensorStation[] = [
       {/* Bottom Left: Windy-Style Dynamic Colorbar Legend (Hidden on mobile < md) */}
       <div
         ref={legendRef}
-        className="hidden-md-down"
+        className="hidden-md-down desktop-legend-overlay"
         style={{
           position: 'absolute',
-          bottom: '24px',
-          left: '14px',
+          bottom: '144px',
+          left: '16px',
           zIndex: 1000,
           background: 'rgba(15, 23, 42, 0.94)',
           backdropFilter: 'blur(10px)',

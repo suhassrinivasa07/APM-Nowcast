@@ -422,6 +422,14 @@ body {
   }
 }
 
+@media (min-width: 1024px) {
+  .selected-cell-inspector {
+    bottom: 144px; /* lg:bottom-36 - sits safely above timeline dock */
+    right: 16px;   /* lg:right-4 */
+    z-index: 1100;
+  }
+}
+
 /* Smooth Horizontal Scrollbars without visual scrollbar clutter */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
@@ -479,6 +487,15 @@ body {
     font-size: 10px !important;
     margin-left: 0 !important;
   }
+}
+
+/* Station vs Cluster Badge Z-Index: Badges strictly above station dish icons */
+.sensor-station-icon {
+  z-index: 500 !important;
+}
+
+.floating-cell-badge {
+  z-index: 650 !important;
 }
 
 /* Header bar responsive flex wrapping */
