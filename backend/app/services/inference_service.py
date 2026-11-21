@@ -306,7 +306,7 @@ def _format_regime_label(
         return f"{region_name} Cyclonic Band"
     if severity in ("severe", "extreme"):
         return f"{region_name} Convective Core"
-    if is_non_convective or severity == "monitoring":
+    if is_non_convective:
         return f"{region_name} Developing / Monitoring"
     if severity == "moderate":
         return f"{region_name} Developing Cell"
@@ -371,7 +371,7 @@ def _build_cells(
                 cape_ratio = max(0.0, cell_cape / 1200.0)
                 flash = round(min(0.28, 0.02 + 0.26 * (cape_ratio ** 2.0)), 2)
                 prob = round(min(0.24, max(0.06, raw_prob * 0.45)), 3)
-                severity = "monitoring"
+                severity = "low"
                 growth = "decaying" if cell_cin > 30 else "steady"
             elif cell_cape < 1900 and not is_cyclonic:
                 # Developing / marginal convection: 0.3 to 2.5 fl/km²
@@ -412,7 +412,7 @@ def _build_cells(
                 cape_ratio = max(0.0, cell_cape / 1200.0)
                 flash = round(min(0.28, 0.02 + 0.25 * (cape_ratio ** 2.0)), 2)
                 prob = round(min(0.22, base["baseProb"] * 0.45), 3)
-                severity = "monitoring"
+                severity = "low"
                 growth = "decaying" if cell_cin > 30 else "steady"
             elif cell_cape < 1900 and not is_cyclonic:
                 cape_norm = (cell_cape - 1200.0) / 700.0
